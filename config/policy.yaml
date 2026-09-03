@@ -10,7 +10,11 @@ filesystem:
 shell:
   enabled: true
   # Разрешены только эти исполняемые файлы (первое слово команды).
-  allow_binaries: [git, make, python3, python, pytest, ruff, mypy, uv, ls, cat, grep, rg, find, sed, awk, head, tail, wc, diff, jq, node, npm]
+  # Оболочек (sh/bash/zsh) здесь намеренно нет: они обошли бы весь allowlist.
+  allow_binaries: [git, make, python3, python, pytest, ruff, mypy, uv, pip,
+                   ls, cat, grep, rg, find, sed, awk, head, tail, wc, sort, uniq, cut, tr,
+                   diff, jq, yq, echo, true, false, test, pwd, date, which, env,
+                   mkdir, cp, mv, touch, tee, xargs, node, npm, npx]
   deny_patterns:
     - "rm\\s+-rf\\s+/"
     - "curl.*\\|\\s*(ba)?sh"
@@ -32,6 +36,7 @@ approval:
   require_human:
     - git_push
     - open_pull_request
+    - write_outside_allowlist   # запись вне filesystem.write_allow
     - delete_outside_var
     - spend_over_usd: 5.0
     - install_system_package
