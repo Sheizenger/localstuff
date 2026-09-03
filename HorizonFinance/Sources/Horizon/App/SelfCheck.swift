@@ -53,6 +53,7 @@ enum SelfCheck {
         checkForecastPriority()
         checkForecastShares()
         checkForecastMixed()
+        checkBasket()
         checkMigration()
         checkFormatting()
 
@@ -240,6 +241,77 @@ enum SelfCheck {
         // Если параллельных целей нет, очередь работает как раньше.
         let onlyQueue = Forecaster.build(goals: [c], pace: 250, savedFor: { _ in 0 }, now: now)
         expect(near(onlyQueue[0].monthly, 250), "без параллельных целей очередь берёт весь темп")
+    }
+
+    private static func checkBasket() {
+        print("\nПродуктовая корзина:")
+
+        let milk = BasketCatalog.product(id: "milk")!
+        let diapers = BasketCatalog.product(id: "diapers")!
+
+        let single = Household(adults: 1, children: [])
+        let couple = Household(adults: 2, children: [])
+        let withBaby = Household(adults: 2, children: [.infant])
+        let withTeen = Household(adults: 2, children: [.school])
+
+        expect(near(BasketPlanner.quantity(for: milk, household: single), 7), "молоко на одного взрослого")
+        // Второй взрослый учитывается с коэффициентом 0.92 — общее хозяйство экономит.
+        expect(near(BasketPlanner.quantity(for: milk, household: couple), 13.44),
+               "двое взрослых — не ровно вдвое больше",
+               "\(BasketPlanner.quantity(for: milk, household: couple))")
+        expect(BasketPlanner.quantity(for: milk, household: withTeen) > BasketPlanner.quantity(for: milk, household: couple),
+               "ребёнок увеличивает корзину")
+        expect(near(BasketPlanner.quantity(for: diapers, household: couple), 0),
+               "без малыша подгузников в корзине нет")
+        expect(near(BasketPlanner.quantity(for: diapers, household: withBaby), 4),
+               "с малышом подгузники появляются")
+
+        var settings = BasketSettings()
+        settings.countryID = "ES"
+        settings.cityID = "madrid"
+        settings.adults = 2
+        settings.selectedChainIDs = ["es_mercadona", "es_lidl", "es_corteingles"]
+
+        let plan = BasketPlanner.plan(settings: settings)
+        expect(plan.chains.count == 3, "считаем только выбранные сети")
+        expect(plan.cheapestSingle?.chain.id == "es_lidl", "дешевле всего Lidl",
+               plan.cheapestSingle?.chain.name ?? "—")
+        expect(plan.chainTotals.last?.chain.id == "es_corteingles", "дороже всего El Corte Inglés")
+        expect(plan.splitTotal <= (plan.cheapestSingle?.total ?? 0) + 0.01,
+               "разделение по категориям не дороже одного дешёвого магазина")
+        expect(plan.categoryWinners.contains(where: { $0.category == .dairy && $0.chain.id == "es_lidl" }),
+               "молочку выгоднее брать в Lidl")
+        expect(!plan.lines.contains(where: { $0.product.category == .baby }),
+               "детских товаров нет в корзине без детей")
+
+        // Город дороже — корзина дороже.
+        var expensive = settings
+        expensive.cityID = "barcelona"
+        let barcelona = BasketPlanner.plan(settings: expensive)
+        expect((barcelona.cheapestSingle?.total ?? 0) > (plan.cheapestSingle?.total ?? 0),
+               "в Барселоне та же корзина дороже, чем в Мадриде")
+
+        // Ручная цена важнее модели.
+        var manual = settings
+        manual.priceOverrides[BasketSettings.overrideKey(chainID: "es_lidl", productID: "milk")] = 0.55
+        let manualPlan = BasketPlanner.plan(settings: manual)
+        let milkLine = manualPlan.lines.first(where: { $0.product.id == "milk" })
+        expect(near(milkLine?.prices["es_lidl"] ?? 0, 0.55), "введённая цена перебивает модель")
+        expect(milkLine?.manual.contains("es_lidl") == true, "цена помечена как своя")
+        expect((manualPlan.cheapestSingle?.total ?? 0) < (plan.cheapestSingle?.total ?? 0),
+               "своя цена меняет итог корзины")
+
+        // Исключённый товар пропадает из расчёта.
+        var trimmed = settings
+        trimmed.excludedProductIDs = ["coffee"]
+        let trimmedPlan = BasketPlanner.plan(settings: trimmed)
+        expect(!trimmedPlan.lines.contains(where: { $0.product.id == "coffee" }), "исключённый товар не считается")
+
+        // Справочник цел: уникальные идентификаторы и заполненные города.
+        let ids = Set(BasketCatalog.products.map { $0.id })
+        expect(ids.count == BasketCatalog.products.count, "идентификаторы товаров уникальны")
+        expect(BasketCatalog.countries.allSatisfy { !$0.cities.isEmpty && !$0.chains.isEmpty },
+               "у каждой страны есть города и сети")
     }
 
     /// Файлы первой версии не знали про режим у цели — проверяем, что они читаются

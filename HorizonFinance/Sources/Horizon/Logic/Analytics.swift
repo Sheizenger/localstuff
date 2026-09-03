@@ -237,6 +237,26 @@ struct Analytics {
         data.goals.filter { !$0.isArchived }.reduce(0.0) { $0 + saved(for: $1) }
     }
 
+    /// Средний фактический расход в месяц по набору категорий — по завершённым месяцам с данными.
+    func averageMonthlySpend(categoryIDs: Set<UUID>, months: Int = 3) -> Double {
+        let window = completedMonths.filter { $0.hasData }.suffix(months).map { $0.month.id }
+        guard !window.isEmpty else { return 0 }
+        let keys = Set(window)
+
+        var sum = 0.0
+        for txn in data.transactions where txn.flow == .expense {
+            guard let id = txn.categoryID, categoryIDs.contains(id) else { continue }
+            if keys.contains(MonthKey(date: txn.date).id) { sum += txn.amount }
+        }
+        return sum / Double(window.count)
+    }
+
+    /// Идентификаторы категорий по названиям — чтобы связать корзину с фактическими тратами.
+    func categoryIDs(named names: [String]) -> Set<UUID> {
+        let lowered = Set(names.map { $0.lowercased() })
+        return Set(data.categories.filter { lowered.contains($0.name.lowercased()) }.map { $0.id })
+    }
+
     /// Свободные деньги: всё, что не разложено по целям.
     var freeCash: Double {
         let flows = data.transactions.reduce(0.0) { $0 + $1.signedAmount }

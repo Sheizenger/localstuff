@@ -232,9 +232,10 @@ struct AppData: Codable {
     var goals: [Goal] = []
     var transactions: [Txn] = []
     var contributions: [Contribution] = []
+    var basket: BasketSettings = BasketSettings()
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, profile, categories, goals, transactions, contributions
+        case schemaVersion, profile, categories, goals, transactions, contributions, basket
     }
 }
 
@@ -253,6 +254,7 @@ extension AppData {
         data.goals = try container.decodeIfPresent([Goal].self, forKey: .goals) ?? []
         data.transactions = try container.decodeIfPresent([Txn].self, forKey: .transactions) ?? []
         data.contributions = try container.decodeIfPresent([Contribution].self, forKey: .contributions) ?? []
+        data.basket = try container.decodeIfPresent(BasketSettings.self, forKey: .basket) ?? BasketSettings()
 
         if version < 2 {
             // Раньше режим распределения был один на все цели и лежал в профиле.
@@ -438,6 +440,16 @@ enum Fmt {
         if n1 == 1 { return "\(count) месяц" }
         if n1 >= 2 && n1 <= 4 { return "\(count) месяца" }
         return "\(count) месяцев"
+    }
+
+    /// «1 взрослый», «2 взрослых» — для состава семьи.
+    static func peopleWord(_ count: Int) -> String {
+        let n = abs(count) % 100
+        let n1 = n % 10
+        if n > 10 && n < 20 { return "\(count) взрослых" }
+        if n1 == 1 { return "\(count) взрослый" }
+        if n1 >= 2 && n1 <= 4 { return "\(count) взрослых" }
+        return "\(count) взрослых"
     }
 
     static func daysWord(_ count: Int) -> String {

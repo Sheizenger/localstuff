@@ -85,6 +85,8 @@ struct RootView: View {
             TransactionsView()
         case .goals:
             GoalsView()
+        case .basket:
+            BasketView()
         case .analytics:
             AnalyticsView()
         case .settings:
