@@ -14,8 +14,7 @@ extension AppData {
             flexibleLimit: 400,
             savingsPlan: 1000,
             paceMode: .weighted,
-            manualPace: 1500,
-            fundingMode: .priority
+            manualPace: 1500
         )
         data.goals = [
             Goal(
@@ -27,7 +26,8 @@ extension AppData {
                 priority: 0,
                 share: 0.6,
                 colorHex: "#2FBF71",
-                note: "Неприкосновенный минимум. Не тратится на машину, поездки и покупки для дома."
+                note: "Неприкосновенный минимум. Не тратится на машину, поездки и покупки для дома.",
+                funding: .queued
             )
         ]
         return data
@@ -46,8 +46,7 @@ extension AppData {
             flexibleLimit: 500,
             savingsPlan: 1500,
             paceMode: .weighted,
-            manualPace: 1500,
-            fundingMode: .priority
+            manualPace: 1500
         )
 
         let cushion = Goal(
@@ -59,7 +58,8 @@ extension AppData {
             priority: 0,
             share: 0.55,
             colorHex: "#2FBF71",
-            note: "Сначала 10k, потом не трогаем."
+            note: "Сначала 10k, потом не трогаем.",
+            funding: .parallel
         )
         let car = Goal(
             title: "Машина",
@@ -70,7 +70,8 @@ extension AppData {
             priority: 1,
             share: 0.3,
             colorHex: "#4F8DF7",
-            note: "Часть наличными, остаток — умеренное финансирование."
+            note: "Часть наличными, остаток — умеренное финансирование.",
+            funding: .parallel
         )
         let home = Goal(
             title: "Первый взнос за жильё",
@@ -81,7 +82,8 @@ extension AppData {
             priority: 2,
             share: 0.15,
             colorHex: "#8E7CF0",
-            note: "Длинная цель. Ипотеку считаем только по подтверждённому доходу."
+            note: "Длинная цель. Ипотеку считаем только по подтверждённому доходу.",
+            funding: .queued
         )
         data.goals = [cushion, car, home]
 

@@ -71,24 +71,39 @@ enum PaceMode: String, Codable, CaseIterable, Hashable, Identifiable {
     }
 }
 
-/// Как распределять темп накоплений между целями.
-enum FundingMode: String, Codable, CaseIterable, Hashable, Identifiable {
-    case priority
-    case shares
+/// Как финансируется конкретная цель. Режим свой у каждой цели:
+/// часть целей может копиться параллельно долями, часть — стоять в общей очереди.
+enum GoalFunding: String, Codable, CaseIterable, Hashable, Identifiable {
+    case parallel
+    case queued
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .priority: return "По очереди"
-        case .shares: return "Параллельно, долями"
+        case .parallel: return "Параллельно"
+        case .queued: return "В очереди"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .parallel: return "параллельно"
+        case .queued: return "в очереди"
         }
     }
 
     var hint: String {
         switch self {
-        case .priority: return "Весь темп идёт в верхнюю цель, следующая стартует после её закрытия"
-        case .shares: return "Каждая цель получает свою долю ежемесячного темпа"
+        case .parallel: return "Цель получает свою долю темпа каждый месяц, начиная с сегодня"
+        case .queued: return "Цель копится из того, что не разобрали параллельные цели, и по очереди приоритета"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .parallel: return "arrow.triangle.branch"
+        case .queued: return "list.number"
         }
     }
 }
@@ -136,13 +151,42 @@ struct Goal: Identifiable, Codable, Hashable {
     /// Уже накоплено до начала учёта в приложении.
     var startingAmount: Double = 0
     var deadline: Date? = nil
-    /// Меньше — важнее. Определяет очередь в режиме «по очереди».
+    /// Меньше — важнее. Определяет порядок в очереди и порядок карточек.
     var priority: Int = 0
-    /// Доля месячного темпа (0...1) в режиме «параллельно, долями».
+    /// Доля месячного темпа (0...1) для целей, которые копятся параллельно.
     var share: Double = 0.5
     var colorHex: String = "#4F8DF7"
     var isArchived: Bool = false
     var note: String = ""
+    /// Своя для каждой цели: копится параллельно долей или ждёт очереди.
+    var funding: GoalFunding = .queued
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, emoji, targetAmount, startingAmount, deadline
+        case priority, share, colorHex, isArchived, note, funding
+    }
+}
+
+// Разбор в расширении, а не в теле структуры: так сохраняется автоматический
+// поэлементный инициализатор, а старые файлы без новых полей продолжают читаться.
+extension Goal {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        var goal = Goal()
+        goal.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        goal.title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        goal.emoji = try container.decodeIfPresent(String.self, forKey: .emoji) ?? "🎯"
+        goal.targetAmount = try container.decodeIfPresent(Double.self, forKey: .targetAmount) ?? 0
+        goal.startingAmount = try container.decodeIfPresent(Double.self, forKey: .startingAmount) ?? 0
+        goal.deadline = try container.decodeIfPresent(Date.self, forKey: .deadline)
+        goal.priority = try container.decodeIfPresent(Int.self, forKey: .priority) ?? 0
+        goal.share = try container.decodeIfPresent(Double.self, forKey: .share) ?? 0.5
+        goal.colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex) ?? "#4F8DF7"
+        goal.isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        goal.note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+        goal.funding = try container.decodeIfPresent(GoalFunding.self, forKey: .funding) ?? .queued
+        self = goal
+    }
 }
 
 struct Profile: Codable, Hashable {
@@ -157,16 +201,74 @@ struct Profile: Codable, Hashable {
     var savingsPlan: Double = 1000
     var paceMode: PaceMode = .weighted
     var manualPace: Double = 1500
-    var fundingMode: FundingMode = .priority
+
+    enum CodingKeys: String, CodingKey {
+        case currencyCode, openingBalance, plannedIncome, essentialsPlan
+        case flexibleLimit, savingsPlan, paceMode, manualPace
+    }
+}
+
+extension Profile {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        var profile = Profile()
+        profile.currencyCode = try container.decodeIfPresent(String.self, forKey: .currencyCode) ?? "EUR"
+        profile.openingBalance = try container.decodeIfPresent(Double.self, forKey: .openingBalance) ?? 0
+        profile.plannedIncome = try container.decodeIfPresent(Double.self, forKey: .plannedIncome) ?? 0
+        profile.essentialsPlan = try container.decodeIfPresent(Double.self, forKey: .essentialsPlan) ?? 0
+        profile.flexibleLimit = try container.decodeIfPresent(Double.self, forKey: .flexibleLimit) ?? 500
+        profile.savingsPlan = try container.decodeIfPresent(Double.self, forKey: .savingsPlan) ?? 1000
+        profile.paceMode = try container.decodeIfPresent(PaceMode.self, forKey: .paceMode) ?? .weighted
+        profile.manualPace = try container.decodeIfPresent(Double.self, forKey: .manualPace) ?? 1500
+        self = profile
+    }
 }
 
 struct AppData: Codable {
-    var schemaVersion: Int = 1
+    /// 1 — общий режим распределения на всё приложение; 2 — режим у каждой цели свой.
+    var schemaVersion: Int = 2
     var profile: Profile = Profile()
     var categories: [Category] = []
     var goals: [Goal] = []
     var transactions: [Txn] = []
     var contributions: [Contribution] = []
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, profile, categories, goals, transactions, contributions
+    }
+}
+
+/// Поля профиля, которых больше нет в модели, но которые нужны для чтения старых файлов.
+private enum LegacyProfileKeys: String, CodingKey {
+    case fundingMode
+}
+
+extension AppData {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        var data = AppData()
+        let version = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        data.profile = try container.decodeIfPresent(Profile.self, forKey: .profile) ?? Profile()
+        data.categories = try container.decodeIfPresent([Category].self, forKey: .categories) ?? []
+        data.goals = try container.decodeIfPresent([Goal].self, forKey: .goals) ?? []
+        data.transactions = try container.decodeIfPresent([Txn].self, forKey: .transactions) ?? []
+        data.contributions = try container.decodeIfPresent([Contribution].self, forKey: .contributions) ?? []
+
+        if version < 2 {
+            // Раньше режим распределения был один на все цели и лежал в профиле.
+            var legacy: String? = nil
+            if let profileContainer = try? container.nestedContainer(keyedBy: LegacyProfileKeys.self, forKey: .profile) {
+                legacy = try? profileContainer.decode(String.self, forKey: .fundingMode)
+            }
+            let migrated: GoalFunding = legacy == "shares" ? .parallel : .queued
+            for index in data.goals.indices {
+                data.goals[index].funding = migrated
+            }
+        }
+
+        data.schemaVersion = 2
+        self = data
+    }
 }
 
 // MARK: - Месяц как ключ

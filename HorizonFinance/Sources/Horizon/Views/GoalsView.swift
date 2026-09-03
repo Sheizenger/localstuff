@@ -52,21 +52,19 @@ struct GoalsView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            Picker("Режим", selection: fundingBinding) {
-                ForEach(FundingMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            Text(store.data.profile.fundingMode.hint)
-                .font(.caption)
-                .foregroundStyle(Palette.muted)
+            distribution
 
             HStack(spacing: 20) {
                 KeyValueRow(key: "Распределено", value: "\(Fmt.money(allocated, code: currency))/мес.", bold: true)
                 KeyValueRow(key: "Свободно от целей", value: "\(Fmt.money(max(pace.value - allocated, 0), code: currency))/мес.")
+            }
+
+            if overSubscribed {
+                Label("Доли параллельных целей в сумме больше 100% — они пересчитаны пропорционально, чтобы уложиться в темп.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(Palette.amber)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if store.analytics.freeCash > 0 && forecasts.contains(where: { !$0.isDone }) {
@@ -88,11 +86,56 @@ struct GoalsView: View {
         .cardStyle()
     }
 
-    private var fundingBinding: Binding<FundingMode> {
-        Binding(
-            get: { store.data.profile.fundingMode },
-            set: { store.data.profile.fundingMode = $0 }
-        )
+    /// Две строки-«дорожки»: кто копится параллельно и кто стоит в очереди.
+    private var distribution: some View {
+        let open = forecasts.filter { !$0.isDone }
+        let parallel = open.filter { $0.funding == .parallel }
+        let queued = open.filter { $0.funding == .queued }
+        return VStack(alignment: .leading, spacing: 8) {
+            distributionRow(
+                funding: .parallel,
+                items: parallel,
+                summary: parallel.isEmpty
+                    ? "Пока никто — цели можно перевести сюда в карточке или в редакторе"
+                    : parallel.map { "\($0.goal.emoji) \($0.goal.title) · \(Fmt.percent($0.goal.share))" }.joined(separator: "   ")
+            )
+            distributionRow(
+                funding: .queued,
+                items: queued,
+                summary: queued.isEmpty
+                    ? "Очередь пуста — остаток темпа просто остаётся свободным"
+                    : queued.enumerated().map { "\($0.offset + 1). \($0.element.goal.emoji) \($0.element.goal.title)" }.joined(separator: "   ")
+            )
+        }
+    }
+
+    private func distributionRow(funding: GoalFunding, items: [GoalForecast], summary: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Label(funding.title, systemImage: funding.icon)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill((funding == .parallel ? Palette.accent : Palette.teal).opacity(0.15))
+                )
+                .foregroundStyle(funding == .parallel ? Palette.accent : Palette.teal)
+                .frame(width: 140, alignment: .leading)
+
+            Text(summary)
+                .font(.caption)
+                .foregroundStyle(items.isEmpty ? Palette.muted : Palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Доли параллельных целей в сумме превышают темп — движок их нормирует.
+    private var overSubscribed: Bool {
+        let sum = forecasts
+            .filter { !$0.isDone && $0.funding == .parallel }
+            .reduce(0.0) { $0 + max($1.goal.share, 0) }
+        return sum > 1.0001
     }
 
     // MARK: Карточки целей
@@ -106,7 +149,8 @@ struct GoalsView: View {
                     onEdit: { editingGoal = forecast.goal },
                     onTopUp: { bus.contributionTarget = forecast.goal },
                     onMoveUp: { store.moveGoal(forecast.goal, up: true) },
-                    onMoveDown: { store.moveGoal(forecast.goal, up: false) }
+                    onMoveDown: { store.moveGoal(forecast.goal, up: false) },
+                    onToggleFunding: { store.toggleFunding(forecast.goal) }
                 )
             }
         }
@@ -146,9 +190,7 @@ struct GoalsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
                     title: "Лента достижения",
-                    subtitle: store.data.profile.fundingMode == .priority
-                        ? "цели закрываются по очереди — сверху вниз"
-                        : "цели наполняются параллельно"
+                    subtitle: "полоса начинается там, где цель получает первые деньги, и кончается на закрытии"
                 )
                 Chart {
                     ForEach(items) { item in
@@ -186,8 +228,13 @@ struct GoalCard: View {
     var onTopUp: () -> Void
     var onMoveUp: () -> Void
     var onMoveDown: () -> Void
+    var onToggleFunding: () -> Void
 
     private var color: Color { Color(hex: forecast.goal.colorHex) }
+
+    private var fundingColor: Color {
+        forecast.funding == .parallel ? Palette.accent : Palette.teal
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -207,9 +254,10 @@ struct GoalCard: View {
                 .frame(width: 38, height: 38)
                 .background(Circle().fill(color.opacity(0.15)))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(forecast.goal.title)
                     .font(.headline)
+                fundingBadge
                 if !forecast.goal.note.isEmpty {
                     Text(forecast.goal.note)
                         .font(.caption)
@@ -225,6 +273,9 @@ struct GoalCard: View {
                 Button("Пополнить", action: onTopUp)
                 Button("Изменить", action: onEdit)
                 Divider()
+                Button(forecast.funding == .parallel ? "Поставить в очередь" : "Копить параллельно",
+                       action: onToggleFunding)
+                Divider()
                 Button("Выше по приоритету", action: onMoveUp)
                 Button("Ниже по приоритету", action: onMoveDown)
             } label: {
@@ -233,6 +284,22 @@ struct GoalCard: View {
             .menuStyle(.borderlessButton)
             .frame(width: 28)
         }
+    }
+
+    /// Как эта цель финансируется — видно прямо на карточке, без захода в редактор.
+    private var fundingBadge: some View {
+        HStack(spacing: 5) {
+            Image(systemName: forecast.funding.icon)
+                .font(.system(size: 9, weight: .bold))
+            Text(forecast.funding == .parallel
+                 ? "параллельно · доля \(Fmt.percent(forecast.goal.share))"
+                 : "в очереди")
+                .font(.caption2.weight(.medium))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(fundingColor.opacity(0.14)))
+        .foregroundStyle(fundingColor)
     }
 
     private var progressBlock: some View {
@@ -276,6 +343,7 @@ struct GoalCard: View {
                         value: "через \(Fmt.horizon(months: forecast.startsInMonths))",
                         valueColor: Palette.amber
                     )
+                    KeyValueRow(key: "Сейчас получает", value: "ничего — ждёт очереди")
                 } else {
                     KeyValueRow(key: "Взнос в месяц", value: Fmt.money(forecast.monthly, code: currency))
                 }
@@ -309,7 +377,7 @@ struct GoalCard: View {
 
     private func deadlineText(_ zone: Zone) -> String {
         guard let slack = forecast.deadlineSlack else { return "" }
-        if slack <= -900 { return "при нулевом темпе срок недостижим" }
+        if slack <= -900 { return "срок недостижим при текущем распределении" }
         switch zone {
         case .safe: return "успеваем, запас \(Fmt.horizon(months: slack))"
         case .warning: return "впритык к сроку"

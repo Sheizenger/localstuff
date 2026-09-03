@@ -177,15 +177,32 @@ struct GoalEditor: View {
                     if hasDeadline {
                         DatePicker("Успеть к", selection: $deadline, displayedComponents: .date)
                     }
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Доля темпа")
-                            Spacer()
-                            Text(Fmt.percent(draft.share))
+                }
+
+                Section("Финансирование") {
+                    Picker("Режим", selection: $draft.funding) {
+                        ForEach(GoalFunding.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    if draft.funding == .parallel {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Доля темпа")
+                                Spacer()
+                                Text(Fmt.percent(draft.share))
+                                    .foregroundStyle(Palette.muted)
+                            }
+                            Slider(value: $draft.share, in: 0...1, step: 0.05)
+                            Text("Цель получает эту долю ежемесячного темпа начиная с сегодня. Если доли всех параллельных целей в сумме больше 100%, они пересчитываются пропорционально.")
+                                .font(.caption)
                                 .foregroundStyle(Palette.muted)
                         }
-                        Slider(value: $draft.share, in: 0...1, step: 0.05)
-                        Text("Работает в режиме «параллельно, долями». В режиме «по очереди» цель финансируется целиком по приоритету.")
+                    } else {
+                        Text("Цель копится из остатка темпа — того, что не разобрали параллельные цели, — и по очереди приоритета. Когда параллельная цель закрывается, её доля тоже уходит в очередь.")
                             .font(.caption)
                             .foregroundStyle(Palette.muted)
                     }

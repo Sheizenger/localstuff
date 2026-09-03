@@ -7,21 +7,25 @@ struct GoalForecast: Identifiable, Hashable {
     var saved: Double
     var remaining: Double
     var progress: Double
-    /// Сколько денег в месяц достаётся этой цели при текущем распределении.
+    /// Сколько денег в месяц достаётся этой цели прямо сейчас.
     var monthly: Double
-    /// Через сколько месяцев цель начнёт финансироваться (режим «по очереди»).
+    /// Через сколько месяцев цель начнёт получать деньги (для целей в очереди).
     var startsInMonths: Double
-    /// Сколько месяцев до закрытия с сегодняшнего дня. nil — при нулевом темпе.
+    /// Сколько месяцев до закрытия с сегодняшнего дня. nil — если срок не определён.
     var months: Double?
     var eta: Date?
     /// Сколько нужно откладывать в месяц, чтобы попасть в дедлайн.
     var requiredMonthly: Double?
     /// Запас до дедлайна в месяцах: «+» — успеваем, «−» — опаздываем.
     var deadlineSlack: Double?
+    /// Заполняется, когда срок посчитать нельзя: нулевой темп, доля 0% и тому подобное.
+    var unfundedReason: String?
 
     var id: UUID { goal.id }
     var isDone: Bool { remaining <= 0.0001 }
-    var isQueued: Bool { !isDone && monthly <= 0 && startsInMonths > 0 }
+    var funding: GoalFunding { goal.funding }
+    /// Цель ждёт своей очереди: деньги пойдут, но позже.
+    var isQueued: Bool { !isDone && monthly <= 0.0001 && startsInMonths > 0 }
 
     var deadlineZone: Zone? {
         guard let slack = deadlineSlack else { return nil }
@@ -32,7 +36,8 @@ struct GoalForecast: Identifiable, Hashable {
 
     var horizonText: String {
         if isDone { return "Цель закрыта" }
-        guard let months = months else { return "Темп нулевой — срок не определён" }
+        if let reason = unfundedReason { return reason }
+        guard let months = months else { return "Срок не определён" }
         return Fmt.horizon(months: months)
     }
 
@@ -45,14 +50,17 @@ struct GoalForecast: Identifiable, Hashable {
 
 enum Forecaster {
 
-    /// Строит прогноз по всем целям исходя из месячного темпа накоплений.
+    /// Дальше этого горизонта не считаем — 50 лет достаточно, чтобы сказать «слишком долго».
+    static let maxMonths = 600
+
+    /// Помесячная симуляция распределения темпа между целями.
     ///
-    /// - `.priority`: весь темп идёт в первую незакрытую цель, следующая стартует после неё.
-    /// - `.shares`: каждая цель получает свою долю темпа (доли нормируются, если сумма > 100%).
+    /// Каждый месяц сначала своё получают параллельные цели (доля темпа; доли нормируются,
+    /// если в сумме дают больше 100%), а всё, что осталось — включая долю только что
+    /// закрывшейся параллельной цели — переходит очереди, сверху вниз по приоритету.
     static func build(
         goals: [Goal],
         pace: Double,
-        mode: FundingMode,
         savedFor: (Goal) -> Double,
         now: Date = Date()
     ) -> [GoalForecast] {
@@ -62,127 +70,121 @@ enum Forecaster {
         }
 
         let step = max(pace, 0)
-
-        switch mode {
-        case .priority:
-            return buildSequential(goals: ordered, pace: step, savedFor: savedFor, now: now)
-        case .shares:
-            return buildParallel(goals: ordered, pace: step, savedFor: savedFor, now: now)
+        let savedAmounts = ordered.map { savedFor($0) }
+        var initialRemaining: [Double] = []
+        for (index, goal) in ordered.enumerated() {
+            initialRemaining.append(max(goal.targetAmount - savedAmounts[index], 0))
         }
-    }
 
-    private static func buildSequential(
-        goals: [Goal],
-        pace: Double,
-        savedFor: (Goal) -> Double,
-        now: Date
-    ) -> [GoalForecast] {
-        var cursor = 0.0
-        var isFirstActive = true
+        var remaining = initialRemaining
+        var firstMonthGive = [Double](repeating: 0, count: ordered.count)
+        var startsIn = [Double?](repeating: nil, count: ordered.count)
+        var completion = [Double?](repeating: nil, count: ordered.count)
+        var everFunded = [Bool](repeating: false, count: ordered.count)
+        var available = 0.0
+
+        // Выдать цели деньги за конкретный месяц и запомнить, когда она закроется.
+        func give(_ index: Int, want: Double, month: Int) {
+            guard want > 0.0001, remaining[index] > 0.0001 else { return }
+            let before = remaining[index]
+            let amount = min(min(want, before), available)
+            guard amount > 0.0001 else { return }
+
+            remaining[index] = before - amount
+            available -= amount
+            everFunded[index] = true
+            if startsIn[index] == nil { startsIn[index] = Double(month) }
+            if month == 0 { firstMonthGive[index] += amount }
+
+            if remaining[index] <= 0.0001 {
+                remaining[index] = 0
+                // Доля месяца, которая реально понадобилась на закрытие остатка.
+                let fraction = min(before / want, 1)
+                completion[index] = Double(month) + fraction
+            }
+        }
+
+        if step > 0 {
+            var month = 0
+            while month < maxMonths {
+                let open = ordered.indices.filter { remaining[$0] > 0.0001 }
+                if open.isEmpty { break }
+
+                available = step
+
+                let parallel = open.filter { ordered[$0].funding == .parallel }
+                let sumShares = parallel.reduce(0.0) { $0 + max(ordered[$1].share, 0) }
+                let factor = sumShares > 1 ? 1 / sumShares : 1
+                for index in parallel {
+                    give(index, want: step * max(ordered[index].share, 0) * factor, month: month)
+                }
+
+                // Остаток темпа уходит в очередь: сначала верхней цели, потом следующей.
+                for index in open where ordered[index].funding == .queued {
+                    if available <= 0.0001 { break }
+                    give(index, want: available, month: month)
+                }
+
+                month += 1
+            }
+        }
+
         var result: [GoalForecast] = []
+        for (index, goal) in ordered.enumerated() {
+            let saved = savedAmounts[index]
+            let left = initialRemaining[index]
+            let months = completion[index]
+            let progress = goal.targetAmount > 0
+                ? (saved / goal.targetAmount).clamped(0, 1)
+                : (left <= 0 ? 1 : 0)
 
-        for goal in goals {
-            let saved = savedFor(goal)
-            let remaining = max(goal.targetAmount - saved, 0)
-
-            if remaining <= 0.0001 {
-                result.append(makeForecast(goal: goal, saved: saved, remaining: 0, monthly: 0,
-                                           startsIn: 0, months: 0, now: now))
-                continue
+            var eta: Date? = nil
+            if left > 0.0001, let value = months, value.isFinite, value >= 0 {
+                eta = dateAfter(months: value, from: now)
             }
 
-            let monthly = isFirstActive ? pace : 0
-            let startsIn = cursor
-
-            var months: Double? = nil
-            if pace > 0 {
-                let need = remaining / pace
-                months = startsIn + need
-                cursor = startsIn + need
+            var reason: String? = nil
+            if left > 0.0001 && months == nil {
+                if step <= 0 {
+                    reason = "Темп нулевой — срок не определён"
+                } else if goal.funding == .parallel && goal.share <= 0 {
+                    reason = "Доля 0% — цель не получает денег"
+                } else if !everFunded[index] {
+                    reason = "Очередь не доходит за 50 лет"
+                } else {
+                    reason = "Дольше 50 лет при текущем распределении"
+                }
             }
-            isFirstActive = false
 
-            result.append(makeForecast(goal: goal, saved: saved, remaining: remaining, monthly: monthly,
-                                       startsIn: startsIn, months: months, now: now))
+            var required: Double? = nil
+            var slack: Double? = nil
+            if let deadline = goal.deadline, left > 0.0001 {
+                let untilDeadline = monthsBetween(now, deadline)
+                required = untilDeadline > 0.01 ? left / untilDeadline : left
+                if let value = months {
+                    slack = untilDeadline - value
+                } else {
+                    slack = -999
+                }
+            }
+
+            result.append(
+                GoalForecast(
+                    goal: goal,
+                    saved: saved,
+                    remaining: left,
+                    progress: progress,
+                    monthly: firstMonthGive[index],
+                    startsInMonths: startsIn[index] ?? 0,
+                    months: months,
+                    eta: eta,
+                    requiredMonthly: required,
+                    deadlineSlack: slack,
+                    unfundedReason: reason
+                )
+            )
         }
         return result
-    }
-
-    private static func buildParallel(
-        goals: [Goal],
-        pace: Double,
-        savedFor: (Goal) -> Double,
-        now: Date
-    ) -> [GoalForecast] {
-        let open = goals.filter { max($0.targetAmount - savedFor($0), 0) > 0.0001 }
-        let sumShares = open.reduce(0.0) { $0 + max($1.share, 0) }
-        let factor = sumShares > 1 ? 1 / sumShares : 1
-
-        var result: [GoalForecast] = []
-        for goal in goals {
-            let saved = savedFor(goal)
-            let remaining = max(goal.targetAmount - saved, 0)
-
-            if remaining <= 0.0001 {
-                result.append(makeForecast(goal: goal, saved: saved, remaining: 0, monthly: 0,
-                                           startsIn: 0, months: 0, now: now))
-                continue
-            }
-
-            let monthly = pace * max(goal.share, 0) * factor
-            let months: Double? = monthly > 0 ? remaining / monthly : nil
-            result.append(makeForecast(goal: goal, saved: saved, remaining: remaining, monthly: monthly,
-                                       startsIn: 0, months: months, now: now))
-        }
-        return result
-    }
-
-    private static func makeForecast(
-        goal: Goal,
-        saved: Double,
-        remaining: Double,
-        monthly: Double,
-        startsIn: Double,
-        months: Double?,
-        now: Date
-    ) -> GoalForecast {
-        let progress = goal.targetAmount > 0 ? (saved / goal.targetAmount).clamped(0, 1) : (remaining <= 0 ? 1 : 0)
-
-        var eta: Date? = nil
-        if remaining <= 0.0001 {
-            eta = nil
-        } else if let m = months, m.isFinite, m >= 0, m < 1200 {
-            eta = dateAfter(months: m, from: now)
-        }
-
-        var required: Double? = nil
-        var slack: Double? = nil
-        if let deadline = goal.deadline, remaining > 0.0001 {
-            let untilDeadline = monthsBetween(now, deadline)
-            if untilDeadline > 0.01 {
-                required = remaining / untilDeadline
-            } else {
-                required = remaining
-            }
-            if let m = months {
-                slack = untilDeadline - m
-            } else {
-                slack = -999
-            }
-        }
-
-        return GoalForecast(
-            goal: goal,
-            saved: saved,
-            remaining: remaining,
-            progress: progress,
-            monthly: monthly,
-            startsInMonths: startsIn,
-            months: months,
-            eta: eta,
-            requiredMonthly: required,
-            deadlineSlack: slack
-        )
     }
 
     /// Дробные месяцы → дата. Считаем через дни, чтобы «2.5 месяца» не округлялось до 3.

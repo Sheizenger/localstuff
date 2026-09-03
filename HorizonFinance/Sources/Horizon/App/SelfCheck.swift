@@ -52,6 +52,8 @@ enum SelfCheck {
         checkBudgetZones()
         checkForecastPriority()
         checkForecastShares()
+        checkForecastMixed()
+        checkMigration()
         checkFormatting()
 
         return failures
@@ -155,54 +157,142 @@ enum SelfCheck {
     }
 
     private static func checkForecastPriority() {
-        print("\nПрогноз, режим «по очереди»:")
+        print("\nПрогноз, цели в очереди:")
         let now = day(2026, 1, 1)
-        let first = Goal(title: "Подушка", targetAmount: 1000, priority: 0)
-        let second = Goal(title: "Машина", targetAmount: 500, priority: 1)
+        let first = Goal(title: "Подушка", targetAmount: 1000, priority: 0, funding: .queued)
+        let second = Goal(title: "Машина", targetAmount: 500, priority: 1, funding: .queued)
 
-        let result = Forecaster.build(goals: [first, second], pace: 250, mode: .priority,
-                                      savedFor: { _ in 0 }, now: now)
+        let result = Forecaster.build(goals: [first, second], pace: 250, savedFor: { _ in 0 }, now: now)
         expect(result.count == 2, "прогноз по двум целям")
         expect(near(result[0].months ?? -1, 4), "первая цель закрывается за 4 месяца")
         expect(near(result[1].months ?? -1, 6), "вторая стартует после первой и закрывается на 6-м месяце")
         expect(near(result[0].monthly, 250) && near(result[1].monthly, 0), "весь темп идёт в верхнюю цель")
         expect(result[1].isQueued, "вторая цель помечена как ожидающая")
 
-        let zeroPace = Forecaster.build(goals: [first], pace: 0, mode: .priority, savedFor: { _ in 0 }, now: now)
+        let zeroPace = Forecaster.build(goals: [first], pace: 0, savedFor: { _ in 0 }, now: now)
         expect(zeroPace[0].months == nil, "при нулевом темпе срок не определён")
+        expect(zeroPace[0].unfundedReason != nil, "объяснение вместо срока")
 
-        let done = Forecaster.build(goals: [first], pace: 250, mode: .priority,
-                                    savedFor: { _ in 1200 }, now: now)
+        let done = Forecaster.build(goals: [first], pace: 250, savedFor: { _ in 1200 }, now: now)
         expect(done[0].isDone && near(done[0].progress, 1), "перевыполненная цель закрыта")
     }
 
     private static func checkForecastShares() {
-        print("\nПрогноз, режим «долями»:")
+        print("\nПрогноз, параллельные цели:")
         let now = day(2026, 1, 1)
-        let a = Goal(title: "A", targetAmount: 1000, priority: 0, share: 0.5)
-        let b = Goal(title: "B", targetAmount: 500, priority: 1, share: 0.5)
+        let a = Goal(title: "A", targetAmount: 1000, priority: 0, share: 0.5, funding: .parallel)
+        let b = Goal(title: "B", targetAmount: 500, priority: 1, share: 0.5, funding: .parallel)
 
-        let result = Forecaster.build(goals: [a, b], pace: 250, mode: .shares, savedFor: { _ in 0 }, now: now)
+        let result = Forecaster.build(goals: [a, b], pace: 250, savedFor: { _ in 0 }, now: now)
         expect(near(result[0].monthly, 125) && near(result[1].monthly, 125), "темп делится поровну")
         expect(near(result[0].months ?? -1, 8), "цель A закрывается за 8 месяцев")
         expect(near(result[1].months ?? -1, 4), "цель B закрывается за 4 месяца")
 
         // Сумма долей больше 100% — нормируем, а не раздаём лишнего.
-        let big1 = Goal(title: "A", targetAmount: 1000, priority: 0, share: 1.0)
-        let big2 = Goal(title: "B", targetAmount: 1000, priority: 1, share: 1.0)
-        let normalized = Forecaster.build(goals: [big1, big2], pace: 200, mode: .shares,
-                                          savedFor: { _ in 0 }, now: now)
+        let big1 = Goal(title: "A", targetAmount: 1000, priority: 0, share: 1.0, funding: .parallel)
+        let big2 = Goal(title: "B", targetAmount: 1000, priority: 1, share: 1.0, funding: .parallel)
+        let normalized = Forecaster.build(goals: [big1, big2], pace: 200, savedFor: { _ in 0 }, now: now)
         let total = normalized.reduce(0.0) { $0 + $1.monthly }
         expect(near(total, 200), "сумма распределений не превышает темп", "получилось \(total)")
 
+        // Доля 0% — цель не финансируется, и это честно сообщается.
+        let idle = Goal(title: "C", targetAmount: 500, priority: 0, share: 0, funding: .parallel)
+        let idleResult = Forecaster.build(goals: [idle], pace: 300, savedFor: { _ in 0 }, now: now)
+        expect(idleResult[0].months == nil && idleResult[0].unfundedReason != nil, "нулевая доля не даёт срока")
+
         // Дедлайн: нужно 1000 за ~6 месяцев, а темп даёт только 100 в месяц.
         let deadline = Cal.ru.date(byAdding: .month, value: 6, to: now)!
-        let tight = Goal(title: "C", targetAmount: 1000, deadline: deadline, priority: 0, share: 1.0)
-        let tightResult = Forecaster.build(goals: [tight], pace: 100, mode: .shares,
-                                           savedFor: { _ in 0 }, now: now)
+        let tight = Goal(title: "C", targetAmount: 1000, deadline: deadline, priority: 0, share: 1.0, funding: .parallel)
+        let tightResult = Forecaster.build(goals: [tight], pace: 100, savedFor: { _ in 0 }, now: now)
         expect((tightResult[0].deadlineSlack ?? 0) < 0, "опоздание к дедлайну определяется")
         expect(tightResult[0].deadlineZone == .danger, "красная метка по дедлайну")
         expect(near(tightResult[0].requiredMonthly ?? 0, 1000 / 6.0, 5), "нужный ежемесячный взнос")
+    }
+
+    /// Главный сценарий: две цели копятся параллельно, третья ждёт очереди
+    /// и подхватывает всё, что осталось, — включая долю закрывшейся цели.
+    private static func checkForecastMixed() {
+        print("\nПрогноз, смешанный режим:")
+        let now = day(2026, 1, 1)
+        let a = Goal(title: "A", targetAmount: 1000, priority: 0, share: 0.5, funding: .parallel)
+        let b = Goal(title: "B", targetAmount: 500, priority: 1, share: 0.5, funding: .parallel)
+        let c = Goal(title: "C", targetAmount: 300, priority: 2, funding: .queued)
+
+        let result = Forecaster.build(goals: [a, b, c], pace: 250, savedFor: { _ in 0 }, now: now)
+        expect(result.count == 3, "прогноз по трём целям")
+        expect(near(result[0].monthly, 125) && near(result[1].monthly, 125),
+               "параллельные цели забирают свои доли сразу")
+        expect(near(result[2].monthly, 0) && result[2].isQueued,
+               "очередной цели сейчас не достаётся ничего")
+
+        expect(near(result[1].months ?? -1, 4), "B (500 по 125) закрывается за 4 месяца")
+        expect(near(result[0].months ?? -1, 8), "A (1000 по 125) закрывается за 8 месяцев")
+        // После закрытия B её 125 уходят в очередь: C получает 125, 125 и 50 → 6.4 месяца.
+        expect(near(result[2].months ?? -1, 6.4, 0.05),
+               "C стартует на 5-м месяце и закрывается за 6.4",
+               "получилось \(String(describing: result[2].months))")
+        expect(near(result[2].startsInMonths, 4), "старт C — после закрытия B")
+
+        // Ни один месяц не раздаёт больше, чем есть в темпе.
+        let handedOut = result.reduce(0.0) { $0 + $1.monthly }
+        expect(handedOut <= 250.0001, "в первый месяц роздано не больше темпа", "роздано \(handedOut)")
+
+        // Если параллельных целей нет, очередь работает как раньше.
+        let onlyQueue = Forecaster.build(goals: [c], pace: 250, savedFor: { _ in 0 }, now: now)
+        expect(near(onlyQueue[0].monthly, 250), "без параллельных целей очередь берёт весь темп")
+    }
+
+    /// Файлы первой версии не знали про режим у цели — проверяем, что они читаются
+    /// и что общий режим из профиля корректно переезжает в каждую цель.
+    private static func checkMigration() {
+        print("\nЧтение файлов первой версии:")
+
+        func legacyJSON(mode: String) -> Data {
+            let text = """
+            {
+              "schemaVersion": 1,
+              "profile": {
+                "currencyCode": "EUR", "openingBalance": 0, "plannedIncome": 0,
+                "essentialsPlan": 0, "flexibleLimit": 400, "savingsPlan": 1000,
+                "paceMode": "weighted", "manualPace": 1500, "fundingMode": "\(mode)"
+              },
+              "categories": [],
+              "goals": [{
+                "id": "1D8A9F3C-0000-4000-8000-000000000001",
+                "title": "Подушка", "emoji": "🛟", "targetAmount": 10000,
+                "startingAmount": 0, "priority": 0, "share": 0.6,
+                "colorHex": "#2FBF71", "isArchived": false, "note": ""
+              }],
+              "transactions": [],
+              "contributions": []
+            }
+            """
+            return Data(text.utf8)
+        }
+
+        let decoder = Persistence.makeDecoder()
+
+        if let shares = try? decoder.decode(AppData.self, from: legacyJSON(mode: "shares")) {
+            expect(shares.goals.first?.funding == .parallel, "старый режим «долями» → параллельная цель")
+            expect(shares.schemaVersion == 2, "версия схемы поднимается до 2")
+            expect(near(shares.profile.flexibleLimit, 400), "остальные настройки на месте")
+            expect(near(shares.goals.first?.share ?? 0, 0.6), "доля цели сохранилась")
+        } else {
+            expect(false, "старый файл с режимом «долями» читается")
+        }
+
+        if let priority = try? decoder.decode(AppData.self, from: legacyJSON(mode: "priority")) {
+            expect(priority.goals.first?.funding == .queued, "старый режим «по очереди» → цель в очереди")
+        } else {
+            expect(false, "старый файл с режимом «по очереди» читается")
+        }
+
+        // Файл без единого знакомого поля не должен ронять приложение.
+        if let empty = try? decoder.decode(AppData.self, from: Data("{}".utf8)) {
+            expect(empty.goals.isEmpty && empty.transactions.isEmpty, "пустой файл читается без ошибок")
+        } else {
+            expect(false, "пустой файл читается без ошибок")
+        }
     }
 
     private static func checkFormatting() {

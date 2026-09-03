@@ -35,7 +35,6 @@ final class Store: ObservableObject {
         return Forecaster.build(
             goals: a.activeGoals,
             pace: a.pace.value,
-            mode: data.profile.fundingMode,
             savedFor: { a.saved(for: $0) }
         )
     }
@@ -110,6 +109,16 @@ final class Store: ObservableObject {
     func updateGoal(_ goal: Goal) {
         guard let index = data.goals.firstIndex(where: { $0.id == goal.id }) else { return }
         data.goals[index] = goal
+    }
+
+    /// Быстрое переключение режима прямо из карточки цели.
+    func toggleFunding(_ goal: Goal) {
+        guard let index = data.goals.firstIndex(where: { $0.id == goal.id }) else { return }
+        data.goals[index].funding = data.goals[index].funding == .parallel ? .queued : .parallel
+        // Параллельная цель с нулевой долей не получала бы ничего — даём осмысленный минимум.
+        if data.goals[index].funding == .parallel && data.goals[index].share <= 0 {
+            data.goals[index].share = 0.25
+        }
     }
 
     func deleteGoal(_ goal: Goal) {

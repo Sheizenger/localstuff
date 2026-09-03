@@ -142,12 +142,11 @@ struct SettingsView: View {
                 }
             }
 
-            Picker("Распределение между целями", selection: profile.fundingMode) {
-                ForEach(FundingMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .frame(width: 380)
+            Label("Распределение темпа задаётся у каждой цели отдельно — на вкладке «Цели»: часть целей копится параллельно долями, часть стоит в очереди.",
+                  systemImage: "arrow.triangle.branch")
+                .font(.caption)
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
