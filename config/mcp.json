@@ -1,0 +1,37 @@
+{
+  "$comment": "Каталог MCP-серверов. auto:true — агент может подключить сам, без подтверждения. Секреты берутся из окружения по имени, значения сюда не пишутся.",
+  "servers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "auto": true,
+      "requires_env": [],
+      "description": "Чтение и запись файлов в пределах песочницы проекта."
+    },
+    "git": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git", "--repository", "."],
+      "auto": true,
+      "requires_env": [],
+      "description": "История, диффы, статус git-репозитория."
+    },
+    "fetch": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "auto": true,
+      "requires_env": [],
+      "description": "Загрузка веб-страниц с учётом network-политики."
+    },
+    "github": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "auto": false,
+      "requires_env": ["GITHUB_TOKEN"],
+      "description": "Issues, PR, файлы репозитория. Нужен токен — агент попросит его у человека."
+    }
+  }
+}

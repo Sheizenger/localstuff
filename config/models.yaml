@@ -1,0 +1,202 @@
+# Каталог моделей. Правится руками — код сюда не пишет.
+#
+# tier — роль модели в системе, а не «размер»:
+#   nano      дешёвая массовая работа: классификация, извлечение, разметка
+#   small     обычные субагенты: поиск, чтение, черновики
+#   large     основной рабочий тир: код, анализ, синтез
+#   reasoning самый дорогой: планирование, критик, разбор провалов
+#
+# pricing_verified: false означает «цены/ID нужно сверить с прайсом провайдера».
+# `agentctl doctor` предупреждает о таких записях, но не блокирует работу.
+
+defaults:
+  # Порядок предпочтения провайдеров при равном тире.
+  provider_order: [anthropic, openai, google, mock]
+  # Тир по умолчанию, если роль его не задала.
+  tier: small
+
+models:
+  # ---------------------------------------------------------------- Anthropic
+  - id: claude-opus-5
+    provider: anthropic
+    tier: reasoning
+    context: 1000000
+    max_output: 128000
+    price_in: 5.00       # $ / 1M входных токенов
+    price_out: 25.00     # $ / 1M выходных токенов
+    supports: [tools, vision, cache, thinking]
+    pricing_verified: true
+
+  - id: claude-sonnet-5
+    provider: anthropic
+    tier: large
+    context: 1000000
+    max_output: 128000
+    price_in: 2.00
+    price_out: 10.00
+    supports: [tools, vision, cache, thinking]
+    pricing_verified: true
+
+  - id: claude-haiku-4-5
+    provider: anthropic
+    tier: small
+    context: 200000
+    max_output: 64000
+    price_in: 1.00
+    price_out: 5.00
+    supports: [tools, vision, cache]
+    pricing_verified: true
+
+  - id: claude-haiku-4-5
+    provider: anthropic
+    tier: nano
+    context: 200000
+    max_output: 8192
+    price_in: 1.00
+    price_out: 5.00
+    supports: [tools, cache]
+    pricing_verified: true
+
+  # ------------------------------------------------------------------- OpenAI
+  # Сверь ID и цены: https://platform.openai.com/docs/models и /pricing
+  - id: gpt-5
+    provider: openai
+    tier: reasoning
+    context: 400000
+    max_output: 128000
+    price_in: 1.25
+    price_out: 10.00
+    supports: [tools, vision, cache]
+    pricing_verified: false
+
+  - id: gpt-5
+    provider: openai
+    tier: large
+    context: 400000
+    max_output: 64000
+    price_in: 1.25
+    price_out: 10.00
+    supports: [tools, vision, cache]
+    pricing_verified: false
+
+  - id: gpt-5-mini
+    provider: openai
+    tier: small
+    context: 400000
+    max_output: 32000
+    price_in: 0.25
+    price_out: 2.00
+    supports: [tools, vision, cache]
+    pricing_verified: false
+
+  - id: gpt-5-nano
+    provider: openai
+    tier: nano
+    context: 400000
+    max_output: 16000
+    price_in: 0.05
+    price_out: 0.40
+    supports: [tools, cache]
+    pricing_verified: false
+
+  # ------------------------------------------------------------------- Google
+  # Сверь ID и цены: https://ai.google.dev/gemini-api/docs/models и /pricing
+  - id: gemini-2.5-pro
+    provider: google
+    tier: reasoning
+    context: 1000000
+    max_output: 64000
+    price_in: 1.25
+    price_out: 10.00
+    supports: [tools, vision, cache, thinking]
+    pricing_verified: false
+
+  - id: gemini-2.5-pro
+    provider: google
+    tier: large
+    context: 1000000
+    max_output: 64000
+    price_in: 1.25
+    price_out: 10.00
+    supports: [tools, vision, cache, thinking]
+    pricing_verified: false
+
+  - id: gemini-2.5-flash
+    provider: google
+    tier: small
+    context: 1000000
+    max_output: 64000
+    price_in: 0.30
+    price_out: 2.50
+    supports: [tools, vision, cache]
+    pricing_verified: false
+
+  - id: gemini-2.5-flash-lite
+    provider: google
+    tier: nano
+    context: 1000000
+    max_output: 16000
+    price_in: 0.10
+    price_out: 0.40
+    supports: [tools, cache]
+    pricing_verified: false
+
+  # --------------------------------------------------------------------- Mock
+  # Детерминированный провайдер: тесты, E2E, работа без ключей.
+  - id: mock-reasoning
+    provider: mock
+    tier: reasoning
+    context: 200000
+    max_output: 8192
+    price_in: 0.0
+    price_out: 0.0
+    supports: [tools]
+    pricing_verified: true
+
+  - id: mock-large
+    provider: mock
+    tier: large
+    context: 200000
+    max_output: 8192
+    price_in: 0.0
+    price_out: 0.0
+    supports: [tools]
+    pricing_verified: true
+
+  - id: mock-small
+    provider: mock
+    tier: small
+    context: 200000
+    max_output: 8192
+    price_in: 0.0
+    price_out: 0.0
+    supports: [tools]
+    pricing_verified: true
+
+  - id: mock-nano
+    provider: mock
+    tier: nano
+    context: 200000
+    max_output: 4096
+    price_in: 0.0
+    price_out: 0.0
+    supports: [tools]
+    pricing_verified: true
+
+embeddings:
+  - id: text-embedding-3-small
+    provider: openai
+    dim: 1536
+    price_in: 0.02
+    pricing_verified: false
+  - id: gemini-embedding-001
+    provider: google
+    dim: 3072
+    price_in: 0.15
+    pricing_verified: false
+  # Оффлайн-fallback: детерминированный хеш-эмбеддер, всегда доступен.
+  - id: hashing-local
+    provider: local
+    dim: 512
+    price_in: 0.0
+    pricing_verified: true

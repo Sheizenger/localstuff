@@ -1,0 +1,48 @@
+# Политика безопасности. Всё, что не разрешено явно, — запрещено.
+
+filesystem:
+  # Пути относительно корня репозитория.
+  read_allow:  ["**"]
+  write_allow: ["var/**", "skills/_proposed/**", "runs/**", "docs/**", "evals/**"]
+  write_deny:  [".git/**", ".env", "**/*.pem", "**/id_rsa*", "**/.ssh/**"]
+  max_file_bytes: 5242880
+
+shell:
+  enabled: true
+  # Разрешены только эти исполняемые файлы (первое слово команды).
+  allow_binaries: [git, make, python3, python, pytest, ruff, mypy, uv, ls, cat, grep, rg, find, sed, awk, head, tail, wc, diff, jq, node, npm]
+  deny_patterns:
+    - "rm\\s+-rf\\s+/"
+    - "curl.*\\|\\s*(ba)?sh"
+    - "wget.*\\|\\s*(ba)?sh"
+    - ":\\(\\)\\{.*\\};:"
+    - "chmod\\s+777\\s+/"
+    - "git\\s+push\\s+--force"
+  timeout_s: 300
+
+network:
+  enabled: true
+  # Пусто = разрешены любые хосты, кроме deny. Заполни, чтобы сузить.
+  allow_hosts: []
+  deny_hosts: ["169.254.169.254", "metadata.google.internal", "localhost:*"]
+
+approval:
+  # Действия, требующие явного подтверждения человека.
+  # Агент ставит задачу в BLOCKED_APPROVAL и продолжает остальные ветки.
+  require_human:
+    - git_push
+    - open_pull_request
+    - delete_outside_var
+    - spend_over_usd: 5.0
+    - install_system_package
+    - enable_mcp_server_not_in_catalog
+
+secrets:
+  # Откуда можно читать секреты. В БД и в логи они не попадают никогда.
+  sources: [env, dotenv]
+  # Маски для редакции в логах и отчётах.
+  redact_patterns:
+    - "sk-[A-Za-z0-9_\\-]{16,}"
+    - "AIza[0-9A-Za-z_\\-]{30,}"
+    - "gh[pousr]_[A-Za-z0-9]{20,}"
+    - "(?i)(api[_-]?key|token|secret|password)\\s*[=:]\\s*\\S+"

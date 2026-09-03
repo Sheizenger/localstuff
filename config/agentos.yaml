@@ -1,0 +1,82 @@
+# Главный конфиг AgentOS. Всё здесь правится без правки кода.
+
+home: ./var                 # где живёт состояние (можно переопределить AGENTOS_HOME)
+
+runtime:
+  # native — субагентов запускает агент-хост (Claude Code / Codex / Gemini CLI):
+  #          AgentOS отдаёт брифы, ключи провайдеров не нужны.
+  # direct — AgentOS сам вызывает провайдеров по API-ключам (headless).
+  # auto   — direct, если есть хоть один ключ, иначе native.
+  mode: auto
+  max_concurrency: 4        # сколько задач параллельно
+  step_timeout_s: 900       # предохранитель на один шаг
+  max_task_attempts: 3      # попыток на задачу до эскалации человеку
+
+budget:
+  # Бюджет на одну миссию. Превышение -> миссия встаёт и просит подтверждения.
+  mission_tokens: 2000000
+  mission_usd: 10.0
+  # Доля бюджета, которую планировщик держит в резерве под критика и доработки.
+  reserve_fraction: 0.25
+  # Порог, после которого рабочий контекст сжимается в handoff-сводку.
+  compaction_threshold_tokens: 60000
+  # Потолок на структурированный отчёт субагента — главный рычаг экономии.
+  subagent_report_tokens: 1200
+
+memory:
+  db: agentos.db
+  events_dir: events
+  artifacts_dir: artifacts
+  # Гибридный поиск: BM25 (FTS5) + косинус по векторам, слияние Reciprocal Rank Fusion.
+  search:
+    top_k: 12
+    rrf_k: 60
+    min_score: 0.0
+  vector:
+    backend: auto           # auto | sqlite-vec | numpy | off
+    embedder: hashing-local # id из config/models.yaml -> embeddings
+  consolidate:
+    on_run_finish: true
+    min_repeats_for_skill: 2   # сколько повторов процедуры -> черновик навыка
+
+quota:
+  # Как система понимает «токены кончились».
+  # Провайдер отдал 429/quota -> задача ждёт до reset_at.
+  default_cooldown_s: 900
+  # Если провайдер не сказал, когда сброс, — считаем окно таким.
+  assumed_window_s: 18000     # 5 часов, типичное окно лимитов
+  # Продолжать ли другие ветки DAG, пока одна ждёт квоту.
+  continue_other_branches: true
+
+self_check:
+  enabled: true
+  # Критик по возможности берётся у ДРУГОГО провайдера, чем исполнитель.
+  cross_provider: true
+  critic_tier: reasoning
+  # Программные верификаторы — жёсткий гейт: критик не может их переспорить.
+  programmatic_gates:
+    - name: tests
+      cmd: "make test"
+      applies_when: "artifacts_touch_code"
+    - name: lint
+      cmd: "make lint"
+      applies_when: "artifacts_touch_code"
+
+improve:
+  enabled: true
+  # Автопромоушен черновика навыка в skills/ без человека.
+  auto_promote_skills: false
+  retro_on_finish: true
+
+capability:
+  # Что агенту разрешено подключать самостоятельно.
+  auto_enable:
+    skills: true
+    mcp_servers: true       # только из config/mcp.json с "auto": true
+    tools: true
+  # Секреты агент не добывает сам — он формирует точный запрос человеку.
+  request_secrets_from_user: true
+
+logging:
+  level: info
+  redact_secrets: true
