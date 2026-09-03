@@ -50,10 +50,10 @@ struct AnalyticsView: View {
 
     private var flowPoints: [FlowPoint] {
         var points: [FlowPoint] = []
-        for month in stats {
-            points.append(FlowPoint(month: month, series: "Доход", value: month.income))
-            points.append(FlowPoint(month: month, series: "Обязательные", value: month.essential))
-            points.append(FlowPoint(month: month, series: "Свободные", value: month.flexible))
+        for item in stats {
+            points.append(FlowPoint(month: item.month, series: "Доход", value: item.income))
+            points.append(FlowPoint(month: item.month, series: "Обязательные", value: item.essential))
+            points.append(FlowPoint(month: item.month, series: "Свободные", value: item.flexible))
         }
         return points
     }
