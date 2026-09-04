@@ -15,6 +15,7 @@ struct BasketView: View {
             summaryTiles
             chainsCard
             splitCard
+            benchmarkCard
             factCard
             productsCard
             sourceNote
@@ -248,6 +249,201 @@ struct BasketView: View {
             }
         }
         .cardStyle()
+    }
+
+    // MARK: Ориентиры из статистики
+
+    private struct BenchmarkBar: Identifiable {
+        enum Kind {
+            case mine
+            case fact
+            case reference
+        }
+
+        let id: String
+        let title: String
+        let value: Double
+        let kind: Kind
+
+        var color: Color {
+            switch kind {
+            case .mine: return Palette.accent
+            case .fact: return Palette.amber
+            case .reference: return Palette.teal
+            }
+        }
+    }
+
+    private var benchmarkBars: [BenchmarkBar] {
+        let people = plan.household.peopleCount
+        var bars: [BenchmarkBar] = [
+            BenchmarkBar(id: "mine", title: "Ваша корзина", value: plan.foodAndSoftDrinksTotal, kind: .mine)
+        ]
+
+        let ids = store.analytics.categoryIDs(named: ["Продукты"])
+        let fact = ids.isEmpty ? 0 : store.analytics.averageMonthlySpend(categoryIDs: ids, months: 3)
+        if fact > 0 {
+            bars.append(BenchmarkBar(id: "fact", title: "Ваш факт", value: fact, kind: .fact))
+        }
+
+        for benchmark in BasketBenchmarks.forCountry(settings.countryID) {
+            bars.append(
+                BenchmarkBar(
+                    id: benchmark.id,
+                    title: benchmark.title,
+                    value: benchmark.expected(forPeople: people),
+                    kind: .reference
+                )
+            )
+        }
+        return bars
+    }
+
+    @ViewBuilder
+    private var benchmarkCard: some View {
+        let benchmarks = BasketBenchmarks.forCountry(settings.countryID)
+        if benchmarks.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle(title: "Сколько тратят другие", subtitle: "ориентиры из официальной статистики")
+                Text("Для \(plan.country.name) сверенных ориентиров пока нет — показывать выдуманные хуже, чем не показывать никаких. Для Испании они есть.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .cardStyle()
+        } else {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(
+                    title: "Сколько тратят другие",
+                    subtitle: "официальная статистика домохозяйств — для сверки, а не для нормирования"
+                )
+
+                Text("Сравнение честное только по одной методике: еда и безалкогольные напитки, без бытовой химии, гигиены и алкоголя. Ваша корзина в этих рамках — \(Fmt.money(plan.foodAndSoftDrinksTotal, code: plan.currency)) в месяц на состав «\(plan.household.title)».")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                benchmarkChart
+                benchmarkRows
+
+                Divider()
+
+                budgetShareRow
+                structureBlock
+            }
+            .cardStyle()
+        }
+    }
+
+    private var benchmarkChart: some View {
+        let bars = benchmarkBars
+        return Chart {
+            ForEach(bars) { bar in
+                BarMark(
+                    x: .value("В месяц", bar.value),
+                    y: .value("Показатель", bar.title)
+                )
+                .foregroundStyle(bar.color)
+                .cornerRadius(4)
+                .annotation(position: .trailing) {
+                    Text(Fmt.money(bar.value, code: plan.currency))
+                        .font(.caption2)
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+        }
+        .frame(height: max(CGFloat(bars.count) * 32 + 30, 120))
+    }
+
+    private var benchmarkRows: some View {
+        let people = plan.household.peopleCount
+        return VStack(alignment: .leading, spacing: 10) {
+            ForEach(BasketBenchmarks.forCountry(settings.countryID)) { benchmark in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(benchmark.title)
+                            .font(.subheadline.weight(.medium))
+                        Spacer(minLength: 12)
+                        Text("\(Fmt.money(benchmark.expected(forPeople: people), code: plan.currency))/мес.")
+                            .font(.subheadline.monospacedDigit())
+                    }
+                    Text(benchmark.scope + " · " + benchmark.period)
+                        .font(.caption2)
+                        .foregroundStyle(Palette.muted)
+                    if let url = URL(string: benchmark.url) {
+                        Link(benchmark.source, destination: url)
+                            .font(.caption2)
+                    } else {
+                        Text(benchmark.source)
+                            .font(.caption2)
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+            }
+            Text("Показатели приведены к размеру вашей семьи: подушевые — умножением, на домохозяйство — со сглаживанием, потому что маленькое хозяйство тратит меньше, но не пропорционально.")
+                .font(.caption2)
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var budgetShareRow: some View {
+        let burn = store.analytics.averageBurn
+        let basketShare = burn > 0 ? plan.foodAndSoftDrinksTotal / burn : 0
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Доля еды в расходах")
+                    .font(.subheadline.weight(.medium))
+                Spacer(minLength: 12)
+                Text("в среднем по стране \(Fmt.percent(BasketBenchmarks.foodShareOfBudget))")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+            if burn > 0 {
+                Text("У вас корзина — \(Fmt.percent(basketShare)) от средних месячных расходов (\(Fmt.money(burn, code: store.currency))).")
+                    .font(.caption)
+                    .foregroundStyle(basketShare > BasketBenchmarks.foodShareOfBudget * 1.5 ? Palette.amber : Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Как только наберётся пара месяцев операций, здесь появится ваша доля.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+        }
+    }
+
+    private var structureBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("На что уходит еда у среднего домохозяйства")
+                .font(.subheadline.weight(.medium))
+            Text("евро из каждых 100 € всех расходов домохозяйства")
+                .font(.caption2)
+                .foregroundStyle(Palette.muted)
+
+            ForEach(BasketBenchmarks.structure) { item in
+                HStack(spacing: 10) {
+                    Text(item.name)
+                        .font(.caption)
+                        .frame(width: 150, alignment: .leading)
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(Palette.teal.opacity(0.55))
+                            .frame(width: max(geo.size.width * CGFloat(item.perHundred / 4.0), 4))
+                    }
+                    .frame(height: 8)
+                    Text(String(format: "%.1f €", item.perHundred))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 48, alignment: .trailing)
+                }
+            }
+
+            Text(BasketBenchmarks.structureSource)
+                .font(.caption2)
+                .foregroundStyle(Palette.muted)
+                .padding(.top, 2)
+        }
     }
 
     // MARK: Сверка с фактом

@@ -64,6 +64,14 @@ struct BasketPlan {
 
     var itemsCount: Int { lines.count }
 
+    /// Сумма по методике статистики: еда и безалкогольные напитки,
+    /// без бытовой химии, гигиены и алкоголя. Только так корзину можно сравнивать с INE.
+    var foodAndSoftDrinksTotal: Double {
+        lines
+            .filter { $0.product.category != .household && $0.product.id != "alcohol" }
+            .reduce(0.0) { $0 + $1.bestTotal }
+    }
+
     func categoryTotal(_ category: BasketCategory) -> Double {
         categoryWinners.first(where: { $0.category == category })?.total ?? 0
     }

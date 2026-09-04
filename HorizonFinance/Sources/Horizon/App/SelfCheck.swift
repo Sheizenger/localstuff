@@ -330,6 +330,37 @@ enum SelfCheck {
         expect(!movedPlan.chains.isEmpty && !movedPlan.chains.contains(where: { $0.id == "es_eroski" }),
                "недоступная сеть заменяется на доступные, а не ломает расчёт")
 
+        // Ориентиры из статистики и главная защита от «слишком дешёвой» корзины.
+        if let ine = BasketBenchmarks.spain.first(where: { $0.id == "ine_epf_2025" }) {
+            expect(near(ine.expected(forPeople: 2), 388, 4),
+                   "показатель на домохозяйство приводится к паре",
+                   "\(ine.expected(forPeople: 2))")
+            expect(ine.expected(forPeople: 3) > ine.expected(forPeople: 2),
+                   "больше людей — больше ожидаемый расход")
+
+            var home = BasketSettings()
+            let homePlan = BasketPlanner.plan(settings: home)
+            let ratio = homePlan.foodAndSoftDrinksTotal / ine.expected(forPeople: 2)
+            expect(ratio > 0.8 && ratio < 1.3,
+                   "корзина пары не расходится со статистикой больше чем на треть",
+                   "отношение \(ratio)")
+
+            home.adults = 1
+            let singlePlan = BasketPlanner.plan(settings: home)
+            expect(singlePlan.foodAndSoftDrinksTotal < homePlan.foodAndSoftDrinksTotal,
+                   "одному нужно меньше, чем паре")
+        } else {
+            expect(false, "ориентир INE есть в справочнике")
+        }
+
+        if let mercasa = BasketBenchmarks.spain.first(where: { $0.id == "mercasa_2025" }) {
+            expect(near(mercasa.expected(forPeople: 2), 297.83, 1),
+                   "подушевой показатель умножается на людей",
+                   "\(mercasa.expected(forPeople: 2))")
+        }
+        expect(BasketBenchmarks.forCountry("DE").isEmpty,
+               "для стран без выверенных данных ориентиры не выдумываются")
+
         // Справочник цел: уникальные идентификаторы и заполненные города.
         let ids = Set(BasketCatalog.products.map { $0.id })
         expect(ids.count == BasketCatalog.products.count, "идентификаторы товаров уникальны")
