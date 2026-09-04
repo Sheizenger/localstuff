@@ -49,6 +49,8 @@ class Runtime:
         return cls(config=config, store=Store(config.db_path))
 
     def close(self) -> None:
+        if "capabilities" in self.__dict__:
+            self.capabilities.shutdown()
         self.store.close()
 
     def __enter__(self) -> Runtime:
@@ -113,12 +115,24 @@ class Runtime:
         return Checkpointer(self.store, self.config.runs_dir, self.config.home)
 
     @cached_property
+    def capabilities(self):
+        """Резолвер возможностей: MCP-серверы, навыки, доступы."""
+        from .tools.capability import CapabilityResolver
+
+        return CapabilityResolver(self)
+
+    @cached_property
     def tools(self) -> ToolRegistry:
+        from .tools.capability import build_capability_tools
+
         registry = ToolRegistry(self.bus)
         registry.register_all(build_fs_tools(self.guard, self.config.root))
         registry.register_all(build_shell_tools(self.guard, self.config.root))
         registry.register_all(build_http_tools(self.guard))
         registry.register_all(self._memory_tools())
+        # MCP-серверы здесь не поднимаются: они включаются по требованию
+        # через capability_request, чтобы старт не платил за весь каталог.
+        registry.register_all(build_capability_tools(self.capabilities))
         return registry
 
     def _memory_tools(self):
