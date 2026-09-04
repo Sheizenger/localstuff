@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..bus import EV_TASK_BLOCKED, EV_TASK_FAILED, EV_TASK_FINISHED
-from ..runtime import MODE_NATIVE, Runtime
+from ..runtime import Runtime
 from ..state.machine import MissionStatus, Task, TaskStatus
 from .dispatch import (
     STATUS_BLOCKED_APPROVAL,
@@ -65,6 +65,10 @@ class Scheduler:
             total.handoffs += tick.handoffs
             if tick.stopped_reason:
                 total.stopped_reason = tick.stopped_reason
+                break
+            if tick.handoffs:
+                # Дальше двигать нечего: ждём, пока агент-хост вернёт
+                # результаты через `agentctl task report`.
                 break
             if not tick.progressed:
                 break
@@ -119,10 +123,6 @@ class Scheduler:
     def _claim_batch(self, mission_id: str) -> list[Task]:
         """Взять пачку задач под лимит параллелизма."""
         limit = max(1, int(self.rt.config.get("runtime.max_concurrency", 4)))
-        # В native-режиме за раз отдаём одно задание: агент-хост выполняет
-        # его сам, и пачка брифов только запутала бы сессию.
-        if self.rt.mode == MODE_NATIVE:
-            limit = 1
         batch: list[Task] = []
         for _ in range(limit):
             task = self.rt.sm.claim_next(mission_id)

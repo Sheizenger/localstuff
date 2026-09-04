@@ -19,7 +19,7 @@ from ..config import Config, ModelSpec
 from ..errors import ProviderUnavailable, QuotaExhausted
 from ..telemetry.quota import QuotaTracker
 from .base import Provider
-from .registry import get_provider, real_providers_configured
+from .registry import get_provider
 
 #: Понижение тира, когда в нужном ничего не доступно.
 TIER_DEGRADE: dict[str, str] = {
@@ -109,13 +109,14 @@ class Router:
     # ------------------------------------------------------------ вспомогательное
     @staticmethod
     def _mock_allowed() -> bool:
-        """Mock разрешён, только когда настоящих провайдеров нет вовсе.
+        """Mock включается только явным AGENTOS_ALLOW_MOCK=1 — тесты и evals.
 
-        Иначе выдуманный ответ выглядел бы как настоящий результат работы.
+        Раньше он разрешался при отсутствии настоящих провайдеров, и в
+        native-режиме выдуманный план выглядел бы как настоящий. Теперь без
+        ключей маршрут просто не находится: intake и planner честно уходят
+        на детерминированные заготовки, а рассуждает агент-хост.
         """
-        if os.environ.get("AGENTOS_ALLOW_MOCK") == "1":
-            return True
-        return not real_providers_configured()
+        return os.environ.get("AGENTOS_ALLOW_MOCK") == "1"
 
     def chain_for(self, tier: str) -> list[str]:
         """Читаемая цепочка запасных вариантов — для doctor и диагностики."""

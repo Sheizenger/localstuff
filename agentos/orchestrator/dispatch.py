@@ -105,12 +105,13 @@ class Dispatcher:
     def _build_brief(self, task: Task, mission: dict[str, Any], role: Any) -> Brief:
         payload = task.brief or {}
         acceptance = payload.get("acceptance") or self._mission_dod(task.mission_id)
+        inputs = [*payload.get("inputs", []), *self._dependency_results(task.id)]
         brief = self.rt.working.build_brief(
             mission_goal=mission.get("goal", ""),
             task_title=task.title,
             instructions=payload.get("instructions", ""),
             acceptance=acceptance,
-            inputs=payload.get("inputs", []),
+            inputs=inputs,
             constraints=payload.get("constraints", []),
             output_schema=role.output_schema or payload.get("output_schema", "report"),
         )
@@ -119,6 +120,24 @@ class Dispatcher:
         if budget:
             brief = self.rt.working.fit_brief(brief, max(400, budget // 2))
         return brief
+
+    def _dependency_results(self, task_id: str) -> list[str]:
+        """Результаты предшественников — вход для этой задачи.
+
+        Передаются именно отчёты, а не транскрипты: связность DAG не должна
+        стоить контекста. Пустой результат пропускается.
+        """
+        rows = self.rt.store.query(
+            "SELECT t.title AS title, t.result AS result FROM task_deps d"
+            " JOIN tasks t ON t.id = d.depends_on"
+            " WHERE d.task_id=? AND t.status='DONE' ORDER BY t.finished_at",
+            (task_id,),
+        )
+        return [
+            f"[из задачи «{r['title']}»]\n{r['result'].strip()}"
+            for r in rows
+            if (r["result"] or "").strip()
+        ]
 
     def _mission_dod(self, mission_id: str) -> list[str]:
         rows = self.rt.store.query(
