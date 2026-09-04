@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -244,7 +245,12 @@ class Store:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path), timeout=30.0, isolation_level=None)
+        # check_same_thread=False + свой мьютекс: планировщик исполняет
+        # независимые ветки DAG в потоках, и все они пишут в одну базу.
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(
+            str(self.path), timeout=30.0, isolation_level=None, check_same_thread=False
+        )
         self._conn.row_factory = _dict_factory
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
@@ -284,28 +290,41 @@ class Store:
     # ---------------------------------------------------------------- basics
     @contextlib.contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
-        """Транзакция. Чекпоинт без неё — не чекпоинт."""
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield self._conn
-        except BaseException:
-            self._conn.execute("ROLLBACK")
-            raise
-        else:
-            self._conn.execute("COMMIT")
+        """Транзакция. Чекпоинт без неё — не чекпоинт.
+
+        Мьютекс делает вложенные транзакции внутри одного потока безопасными
+        и сериализует запись из параллельных веток DAG.
+        """
+        with self._lock:
+            nested = self._conn.in_transaction
+            if not nested:
+                self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield self._conn
+            except BaseException:
+                if not nested:
+                    self._conn.execute("ROLLBACK")
+                raise
+            else:
+                if not nested:
+                    self._conn.execute("COMMIT")
 
     def execute(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
-        return self._conn.execute(sql, params)
+        with self._lock:
+            return self._conn.execute(sql, params)
 
     def query(self, sql: str, params: tuple | dict = ()) -> list[dict[str, Any]]:
-        return list(self._conn.execute(sql, params).fetchall())
+        with self._lock:
+            return list(self._conn.execute(sql, params).fetchall())
 
     def one(self, sql: str, params: tuple | dict = ()) -> dict[str, Any] | None:
-        row = self._conn.execute(sql, params).fetchone()
+        with self._lock:
+            row = self._conn.execute(sql, params).fetchone()
         return row if row else None
 
     def scalar(self, sql: str, params: tuple | dict = (), default: Any = None) -> Any:
-        row = self._conn.execute(sql, params).fetchone()
+        with self._lock:
+            row = self._conn.execute(sql, params).fetchone()
         if not row:
             return default
         return next(iter(row.values()), default)

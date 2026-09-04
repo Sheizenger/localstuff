@@ -69,6 +69,11 @@ class EventBus:
         **payload: Any,
     ) -> int:
         """Записать событие. Возвращает его id в таблице events."""
+        # 'kind', 'mission_id', 'task_id', 'actor' — имена параметров emit;
+        # в payload они дают невнятный TypeError, поэтому переименовываются.
+        for reserved in ("kind", "mission_id", "task_id", "actor"):
+            if reserved in payload:
+                payload[f"payload_{reserved}"] = payload.pop(reserved)
         ts = time.time()
         clean = self.redactor.apply(payload)
         blob = json.dumps(clean, ensure_ascii=False, default=str)
