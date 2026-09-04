@@ -202,6 +202,9 @@ final class Store: ObservableObject {
         var note = merchant.isEmpty ? "Чек" : "Чек: \(merchant)"
         if let code = receipt.receiptCode { note += " · \(code)" }
 
+        // Чек из бургерной — это не продукты домой, и в лимит он попадает по-другому.
+        let mainCategory = ReceiptParser.isFastFood(merchant) ? "Фаст-фуд" : "Продукты"
+
         let flexibleLines = receipt.lines.filter { $0.category == .household || $0.productID == "alcohol" }
         let foodLines = receipt.lines.filter { !($0.category == .household || $0.productID == "alcohol") }
         let flexibleTotal = flexibleLines.reduce(0.0) { $0 + $1.amount }
@@ -215,7 +218,7 @@ final class Store: ObservableObject {
             food.date = date
             food.amount = (foodTotal * 100).rounded() / 100
             food.flow = .expense
-            food.categoryID = category(named: "Продукты", flow: .expense)?.id
+            food.categoryID = category(named: mainCategory, flow: .expense)?.id
             food.note = note
             food.merchant = merchant
             food.receiptLines = foodLines
@@ -236,7 +239,7 @@ final class Store: ObservableObject {
             txn.date = date
             txn.amount = (receipt.amountToRecord * 100).rounded() / 100
             txn.flow = .expense
-            txn.categoryID = category(named: "Продукты", flow: .expense)?.id
+            txn.categoryID = category(named: mainCategory, flow: .expense)?.id
             txn.note = note
             txn.merchant = merchant
             txn.receiptLines = receipt.lines

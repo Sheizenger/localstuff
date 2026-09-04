@@ -85,6 +85,19 @@ enum ReceiptParser {
         return nil
     }
 
+    /// Заведения, чей чек логичнее записать в фаст-фуд, а не в продукты.
+    static let fastFoodMerchants = [
+        "mcdonald", "burger king", "kfc", "telepizza", "domino", "goiko", "subway",
+        "papa john", "five guys", "taco bell", "pans", "rodilla", "vips", "starbucks",
+        "glovo", "uber eats", "just eat", "deliveroo", "kebab", "pizzeria"
+    ]
+
+    static func isFastFood(_ merchant: String) -> Bool {
+        let normalized = ProductMatcher.normalize(merchant)
+        guard !normalized.isEmpty else { return false }
+        return fastFoodMerchants.contains { normalized.contains(ProductMatcher.normalize($0)) }
+    }
+
     static func detectChainID(name: String, lines: [String]) -> String? {
         let haystack = ProductMatcher.normalize(name + " " + lines.prefix(8).joined(separator: " "))
         guard !haystack.isEmpty else { return nil }

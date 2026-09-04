@@ -21,6 +21,26 @@ struct TransactionsView: View {
     @State private var query: String = ""
     @State private var editingTxn: Txn? = nil
     @State private var expandedReceiptID: UUID? = nil
+    @State private var filter: Filter = .all
+
+    /// Быстрый фильтр списка — включается нажатием на плитку итогов.
+    enum Filter: String, CaseIterable, Identifiable {
+        case all
+        case income
+        case essential
+        case flexible
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all: return "все операции"
+            case .income: return "доходы"
+            case .essential: return "обязательные расходы"
+            case .flexible: return "свободные траты"
+            }
+        }
+    }
 
     private var currency: String { store.currency }
 
@@ -35,6 +55,8 @@ struct TransactionsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+
+            filterChip
 
             if tab == .operations {
                 operationsList
@@ -104,32 +126,118 @@ struct TransactionsView: View {
 
     private var summaryStrip: some View {
         let stats = store.analytics.stats(for: month)
+        let limit = store.data.profile.flexibleLimit
+        let flexibleValue = limit > 0
+            ? "\(Fmt.money(stats.flexible, code: currency)) из \(Fmt.money(limit, code: currency))"
+            : Fmt.money(stats.flexible, code: currency)
+
         return HStack(spacing: 12) {
-            summaryItem("Доход", Fmt.money(stats.income, code: currency), Palette.green)
-            summaryItem("Обязательные", Fmt.money(stats.essential, code: currency), Palette.teal)
-            summaryItem("Свободные", Fmt.money(stats.flexible, code: currency), Palette.violet)
-            summaryItem("Осталось", Fmt.signedMoney(stats.net, code: currency), stats.net >= 0 ? Palette.green : Palette.red)
-            summaryItem("В цели", Fmt.money(stats.moved, code: currency), Palette.accent)
+            summaryTile(
+                title: "Доход",
+                value: Fmt.money(stats.income, code: currency),
+                color: Palette.green,
+                filter: .income,
+                help: "Все поступления за месяц. Нажмите, чтобы оставить в списке только доходы."
+            )
+            summaryTile(
+                title: "Обязательные",
+                value: Fmt.money(stats.essential, code: currency),
+                color: Palette.teal,
+                filter: .essential,
+                help: "Аренда, счета, продукты, транспорт — лимит месяца они не трогают."
+            )
+            summaryTile(
+                title: "Свободные",
+                value: flexibleValue,
+                color: Palette.violet,
+                filter: .flexible,
+                help: "Кафе, покупки, поездки — именно они съедают месячный лимит."
+            )
+            summaryTile(
+                title: "Осталось",
+                value: Fmt.signedMoney(stats.net, code: currency),
+                color: stats.net >= 0 ? Palette.green : Palette.red,
+                filter: nil,
+                help: "Доход минус все расходы за месяц — это и есть темп накоплений."
+            )
+            summaryTile(
+                title: "В цели",
+                value: Fmt.money(stats.moved, code: currency),
+                color: Palette.accent,
+                filter: nil,
+                help: "Сколько за месяц переведено в цели."
+            )
         }
     }
 
-    private func summaryItem(_ title: String, _ value: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(Palette.muted)
-            Text(value)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+    private func summaryTile(
+        title: String,
+        value: String,
+        color: Color,
+        filter target: Filter?,
+        help: String
+    ) -> some View {
+        let isActive = target != nil && filter == target
+        return Button {
+            guard let target = target else { return }
+            filter = (filter == target) ? .all : target
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                Text(value)
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.regularMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isActive ? color : Color.clear, lineWidth: 1.5)
+            )
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.regularMaterial)
-        )
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    @ViewBuilder
+    private var filterChip: some View {
+        if filter != .all {
+            HStack(spacing: 8) {
+                Label("Показаны только: \(filter.title)", systemImage: "line.3.horizontal.decrease.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Palette.accent)
+                Button {
+                    filter = .all
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.muted)
+                .help("Показать все операции")
+                Spacer()
+            }
+        }
+    }
+
+    /// «Сегодня» и «Вчера» читаются быстрее, чем дата.
+    private func dayTitle(_ date: Date) -> String {
+        if Cal.ru.isDateInToday(date) {
+            return "Сегодня, " + Fmt.daySimple.string(from: date)
+        }
+        if Cal.ru.isDateInYesterday(date) {
+            return "Вчера, " + Fmt.daySimple.string(from: date)
+        }
+        return Fmt.dayLong.string(from: date).capitalizedFirst
     }
 
     // MARK: Операции
@@ -140,9 +248,24 @@ struct TransactionsView: View {
         return store.data.transactions
             .filter { MonthKey(date: $0.date) == month }
             .filter { txn in
+                switch filter {
+                case .all:
+                    return true
+                case .income:
+                    return txn.flow == .income
+                case .essential:
+                    return txn.flow == .expense && analytics.kind(of: txn) == .essential
+                case .flexible:
+                    return txn.flow == .expense && analytics.kind(of: txn) == .flexible
+                }
+            }
+            .filter { txn in
                 guard !text.isEmpty else { return true }
                 let categoryName = analytics.category(for: txn)?.name.lowercased() ?? ""
-                return txn.note.lowercased().contains(text) || categoryName.contains(text)
+                let merchant = txn.merchant.lowercased()
+                return txn.note.lowercased().contains(text)
+                    || categoryName.contains(text)
+                    || merchant.contains(text)
             }
             .sorted { $0.date > $1.date }
     }
@@ -165,19 +288,33 @@ struct TransactionsView: View {
     @ViewBuilder
     private var operationsList: some View {
         if groupedTxns.isEmpty {
-            EmptyState(
-                icon: "tray",
-                title: "В этом месяце пусто",
-                message: "Добавьте первую операцию — доход, аренду, продукты или кофе. Прогноз пересчитается автоматически.",
-                actionTitle: "Добавить операцию",
-                action: { bus.showAddTransaction = true }
-            )
-            .cardStyle()
+            if filter == .all && query.isEmpty {
+                EmptyState(
+                    icon: "tray",
+                    title: "В этом месяце пусто",
+                    message: "Добавьте первую операцию — доход, аренду, продукты или кофе. Прогноз пересчитается автоматически.",
+                    actionTitle: "Добавить операцию",
+                    action: { bus.showAddTransaction = true }
+                )
+                .cardStyle()
+            } else {
+                EmptyState(
+                    icon: "line.3.horizontal.decrease.circle",
+                    title: "Ничего не подошло",
+                    message: "Под текущий отбор операций в этом месяце нет. Сбросьте фильтр или поиск.",
+                    actionTitle: "Показать все",
+                    action: {
+                        filter = .all
+                        query = ""
+                    }
+                )
+                .cardStyle()
+            }
         } else {
             ForEach(groupedTxns) { group in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(Fmt.dayLong.string(from: group.date).capitalizedFirst)
+                        Text(dayTitle(group.date))
                             .font(.subheadline.weight(.semibold))
                         Spacer()
                         Text(Fmt.signedMoney(group.items.reduce(0.0) { $0 + $1.signedAmount }, code: currency, fraction: true))

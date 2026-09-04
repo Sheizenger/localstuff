@@ -101,6 +101,8 @@ struct DashboardView: View {
                 caption: month.income > 0 ? "норма сбережений \(Fmt.percent(month.savingsRate))" : "пока пусто",
                 tint: Palette.green
             )
+            .help("Все поступления за месяц. Норма сбережений — какая доля дохода осталась.")
+
             StatTile(
                 icon: "arrow.up.circle.fill",
                 title: "Расходы",
@@ -108,6 +110,10 @@ struct DashboardView: View {
                 caption: "обязательные \(Fmt.money(month.essential, code: currency)) · свободные \(Fmt.money(month.flexible, code: currency))",
                 tint: Palette.red
             )
+            .help("Обязательные лимит месяца не трогают, свободные — трогают. Нажмите, чтобы открыть операции.")
+            .contentShape(Rectangle())
+            .onTapGesture { bus.section = .transactions }
+
             StatTile(
                 icon: "arrow.down.to.line",
                 title: "Переведено в цели",
@@ -115,6 +121,10 @@ struct DashboardView: View {
                 caption: "план: \(Fmt.money(store.data.profile.savingsPlan, code: currency))/мес.",
                 tint: Palette.accent
             )
+            .help("Прогресс целей растёт только от этих переводов. Нажмите, чтобы открыть цели.")
+            .contentShape(Rectangle())
+            .onTapGesture { bus.section = .goals }
+
             StatTile(
                 icon: "speedometer",
                 title: "Темп накоплений",
@@ -122,6 +132,9 @@ struct DashboardView: View {
                 caption: pace.isPlanned ? "по плану из настроек" : pace.basis,
                 tint: pace.value > 0 ? Palette.teal : Palette.amber
             )
+            .help("Доход минус расходы по завершённым месяцам — из него считаются сроки целей.")
+            .contentShape(Rectangle())
+            .onTapGesture { bus.section = .analytics }
         }
     }
 

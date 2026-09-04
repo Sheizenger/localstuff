@@ -251,8 +251,9 @@ extension Profile {
 }
 
 struct AppData: Codable {
-    /// 1 — общий режим распределения на всё приложение; 2 — режим у каждой цели свой.
-    var schemaVersion: Int = 2
+    /// 1 — общий режим распределения на всё приложение; 2 — режим у каждой цели свой;
+    /// 3 — в стандартных категориях появился фаст-фуд.
+    var schemaVersion: Int = 3
     var profile: Profile = Profile()
     var categories: [Category] = []
     var goals: [Goal] = []
@@ -298,7 +299,19 @@ extension AppData {
             }
         }
 
-        data.schemaVersion = 2
+        if version < 3 {
+            // Фаст-фуд появился позже: добавляем его тем, у кого набор категорий стандартный.
+            let hasFastFood = data.categories.contains {
+                $0.name.caseInsensitiveCompare("Фаст-фуд") == .orderedSame
+            }
+            if !hasFastFood && !data.categories.isEmpty {
+                data.categories.append(
+                    Category(name: "Фаст-фуд", emoji: "🍔", flow: .expense, kind: .flexible)
+                )
+            }
+        }
+
+        data.schemaVersion = 3
         self = data
     }
 }
@@ -402,6 +415,14 @@ enum Fmt {
         f.locale = locale
         f.calendar = Cal.ru
         f.dateFormat = "d MMMM, EEEE"
+        return f
+    }()
+
+    static let daySimple: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = locale
+        f.calendar = Cal.ru
+        f.dateFormat = "d MMMM"
         return f
     }()
 

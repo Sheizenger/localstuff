@@ -496,7 +496,7 @@ enum SelfCheck {
 
         if let shares = try? decoder.decode(AppData.self, from: legacyJSON(mode: "shares")) {
             expect(shares.goals.first?.funding == .parallel, "старый режим «долями» → параллельная цель")
-            expect(shares.schemaVersion == 2, "версия схемы поднимается до 2")
+            expect(shares.schemaVersion == 3, "версия схемы поднимается до актуальной")
             expect(near(shares.profile.flexibleLimit, 400), "остальные настройки на месте")
             expect(near(shares.goals.first?.share ?? 0, 0.6), "доля цели сохранилась")
         } else {
@@ -508,6 +508,37 @@ enum SelfCheck {
         } else {
             expect(false, "старый файл с режимом «по очереди» читается")
         }
+
+        // Фаст-фуд добавляется в старые файлы, но не дублируется.
+        let legacyWithCategories = """
+        {
+          "schemaVersion": 2,
+          "categories": [
+            {"id": "2D8A9F3C-0000-4000-8000-000000000002", "name": "Продукты", "emoji": "🛒",
+             "flow": "expense", "kind": "essential", "isArchived": false}
+          ]
+        }
+        """
+        if let migrated = try? decoder.decode(AppData.self, from: Data(legacyWithCategories.utf8)) {
+            let fastFood = migrated.categories.filter {
+                $0.name.caseInsensitiveCompare("Фаст-фуд") == .orderedSame
+            }
+            expect(fastFood.count == 1, "фаст-фуд добавлен в старый набор категорий")
+            expect(fastFood.first?.kind == .flexible, "фаст-фуд — свободная трата")
+            expect(migrated.schemaVersion == 3, "версия схемы поднимается до 3")
+
+            let again = try? decoder.decode(AppData.self, from: Persistence.makeEncoder().encode(migrated))
+            let twice = again?.categories.filter { $0.name.caseInsensitiveCompare("Фаст-фуд") == .orderedSame }
+            expect(twice?.count == 1, "повторное чтение не плодит дубликаты")
+        } else {
+            expect(false, "файл второй версии читается")
+        }
+
+        expect(Category.defaults.contains { $0.name == "Фаст-фуд" && $0.kind == .flexible },
+               "фаст-фуд есть в стандартном наборе")
+        expect(ReceiptParser.isFastFood("BURGER KING BILBAO"), "бургерная опознаётся как фаст-фуд")
+        expect(ReceiptParser.isFastFood("Glovo"), "доставка готовой еды — тоже фаст-фуд")
+        expect(!ReceiptParser.isFastFood("EROSKI CENTER"), "супермаркет фаст-фудом не считается")
 
         // Файл без единого знакомого поля не должен ронять приложение.
         if let empty = try? decoder.decode(AppData.self, from: Data("{}".utf8)) {

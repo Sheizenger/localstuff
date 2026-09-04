@@ -176,6 +176,7 @@ extension Category {
             Category(name: "Документы", emoji: "📄", flow: .expense, kind: .essential),
 
             Category(name: "Кафе и доставка", emoji: "🍽", flow: .expense, kind: .flexible),
+            Category(name: "Фаст-фуд", emoji: "🍔", flow: .expense, kind: .flexible),
             Category(name: "Покупки", emoji: "🛍", flow: .expense, kind: .flexible),
             Category(name: "Дом и обустройство", emoji: "🪑", flow: .expense, kind: .flexible),
             Category(name: "Здоровье", emoji: "💊", flow: .expense, kind: .flexible),
