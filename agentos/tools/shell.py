@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -13,9 +14,18 @@ MAX_OUTPUT_CHARS = 20000
 
 
 def run_command(
-    command: str, guard: PolicyGuard, cwd: Path, timeout_s: int | None = None
+    command: str,
+    guard: PolicyGuard,
+    cwd: Path,
+    timeout_s: int | None = None,
+    env: dict[str, str] | None = None,
 ) -> ToolResult:
-    """Выполнить команду с проверкой политики. Используется и гейтами."""
+    """Выполнить команду с проверкой политики. Используется и гейтами.
+
+    env передаётся явно, а не через мутацию os.environ: планировщик
+    исполняет ветки DAG параллельно, и глобальная правка окружения
+    протекала бы между потоками.
+    """
     verdict = guard.check_shell(command)
     if not verdict.allowed:
         return ToolResult(False, error=verdict.reason)
@@ -27,6 +37,7 @@ def run_command(
             capture_output=True,
             text=True,
             timeout=timeout_s or verdict.timeout_s,
+            env={**os.environ, **(env or {})},
         )
     except subprocess.TimeoutExpired:
         return ToolResult(False, error=f"таймаут {timeout_s or verdict.timeout_s}s: {command}")

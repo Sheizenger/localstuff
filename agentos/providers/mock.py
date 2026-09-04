@@ -8,6 +8,8 @@
 Управление через окружение:
   AGENTOS_MOCK_STATE      файл-счётчик вызовов (нужен, чтобы сбой пережил краш)
   AGENTOS_MOCK_FAULTS     JSON: [{"at": 3, "type": "quota", "reset_in": 0}]
+                          "at" — точный номер вызова, "after" — все вызовы
+                          начиная с этого номера;
                           типы: quota | ratelimit | transient | overflow
 """
 
@@ -16,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -31,6 +34,11 @@ class MockProvider(Provider):
     name = "mock"
     env_keys = ()
 
+    #: Счётчик общий на процесс: планировщик исполняет ветки DAG в потоках,
+    #: и без блокировки два потока получали бы один и тот же номер вызова —
+    #: сбой «на N-м вызове» тогда молча пропускался бы.
+    _counter_lock = threading.Lock()
+
     def __init__(self) -> None:
         self._calls = 0
 
@@ -42,21 +50,22 @@ class MockProvider(Provider):
 
     def _bump(self) -> int:
         """Счётчик вызовов. На диске — чтобы сбой воспроизводился после краша."""
-        path = self._state_path
-        if path is None:
-            self._calls += 1
-            return self._calls
-        try:
-            current = int(path.read_text().strip() or "0")
-        except (OSError, ValueError):
-            current = 0
-        current += 1
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(str(current))
-        except OSError:
-            pass
-        return current
+        with self._counter_lock:
+            path = self._state_path
+            if path is None:
+                self._calls += 1
+                return self._calls
+            try:
+                current = int(path.read_text().strip() or "0")
+            except (OSError, ValueError):
+                current = 0
+            current += 1
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(str(current))
+            except OSError:
+                pass
+            return current
 
     def _maybe_fail(self, call_no: int, model: str) -> None:
         raw = os.environ.get("AGENTOS_MOCK_FAULTS", "")
@@ -67,7 +76,9 @@ class MockProvider(Provider):
         except json.JSONDecodeError:
             return
         for fault in faults:
-            if int(fault.get("at", -1)) != call_no:
+            exact = int(fault.get("at", -1)) == call_no
+            after = "after" in fault and call_no >= int(fault["after"])
+            if not (exact or after):
                 continue
             kind = fault.get("type", "transient")
             if kind == "quota":

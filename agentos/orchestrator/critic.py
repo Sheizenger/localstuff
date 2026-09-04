@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,6 +27,11 @@ from ..tools.shell import run_command
 
 #: Сколько попыток исправления допускается до эскалации человеку.
 MAX_FIX_ROUNDS = 2
+
+#: Метка «мы уже внутри программного гейта». Гейт обычно запускает тесты,
+#: а тесты могут запускать миссию — без этой метки получается бесконечная
+#: рекурсия make test -> pytest -> миссия -> make test.
+IN_GATE_ENV = "AGENTOS_IN_GATE"
 
 
 @dataclass
@@ -59,9 +65,26 @@ class Critic:
             " AND cmd != '' ORDER BY ord",
             (mission_id,),
         )
+        nested = os.environ.get(IN_GATE_ENV) == "1"
         results: list[GateResult] = []
         for row in rows:
-            outcome = run_command(row["cmd"], self.rt.guard, self.rt.config.root)
+            if nested:
+                # Мы уже выполняемся внутри гейта: повторный запуск зациклится.
+                results.append(
+                    GateResult(
+                        row["criterion"],
+                        row["cmd"],
+                        True,
+                        "пропущен: выполняется внутри другого программного гейта",
+                    )
+                )
+                continue
+            outcome = run_command(
+                row["cmd"],
+                self.rt.guard,
+                self.rt.config.root,
+                env={IN_GATE_ENV: "1"},
+            )
             passed = outcome.ok
             tail = (outcome.output or outcome.error)[-2000:]
             results.append(GateResult(row["criterion"], row["cmd"], passed, tail))
