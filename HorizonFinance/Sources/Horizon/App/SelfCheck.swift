@@ -255,10 +255,15 @@ enum SelfCheck {
         let withTeen = Household(adults: 2, children: [.school])
 
         expect(near(BasketPlanner.quantity(for: milk, household: single), 7), "молоко на одного взрослого")
-        // Второй взрослый учитывается с коэффициентом 0.92 — общее хозяйство экономит.
-        expect(near(BasketPlanner.quantity(for: milk, household: couple), 13.44),
-               "двое взрослых — не ровно вдвое больше",
+        // Еду второй взрослый ест наравне с первым — никакой «экономии» на продуктах нет.
+        expect(near(BasketPlanner.quantity(for: milk, household: couple), 14),
+               "двое взрослых съедают вдвое больше",
                "\(BasketPlanner.quantity(for: milk, household: couple))")
+        // А вот бытовая химия делится на всех: 0.7 + 0.7 × 0.75.
+        let paper = BasketCatalog.product(id: "toiletpaper")!
+        expect(near(BasketPlanner.quantity(for: paper, household: couple), 1.23, 0.02),
+               "хозтовары делятся на общее хозяйство",
+               "\(BasketPlanner.quantity(for: paper, household: couple))")
         expect(BasketPlanner.quantity(for: milk, household: withTeen) > BasketPlanner.quantity(for: milk, household: couple),
                "ребёнок увеличивает корзину")
         expect(near(BasketPlanner.quantity(for: diapers, household: couple), 0),

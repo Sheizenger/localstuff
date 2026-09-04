@@ -84,9 +84,11 @@ enum BasketPlanner {
         var total = 0.0
 
         if product.onlyForAges.isEmpty {
-            // Второй и третий взрослый едят столько же, но хозяйство общее — часть расходов не удваивается.
+            // Еду второй взрослый ест наравне с первым, а вот бытовая химия и хозтовары
+            // делятся на всех — экономия от общего хозяйства только здесь.
+            let scale = product.category == .household ? 0.75 : 1.0
             for index in 0..<max(household.adults, 0) {
-                total += product.perAdult * (index == 0 ? 1.0 : 0.92)
+                total += product.perAdult * (index == 0 ? 1.0 : scale)
             }
             for child in household.children {
                 total += product.perChild * child.factor
