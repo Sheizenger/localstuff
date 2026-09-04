@@ -128,7 +128,7 @@ class BruteForceIndex:
         sql = "SELECT id, embedding FROM facts WHERE embedding IS NOT NULL"
         params: list[Any] = []
         if kinds:
-            sql += " AND kind IN (%s)" % ",".join("?" * len(kinds))
+            sql += f" AND kind IN ({','.join('?' * len(kinds))})"
             params += list(kinds)
         rows = self.store.query(sql, tuple(params))
         if not rows:

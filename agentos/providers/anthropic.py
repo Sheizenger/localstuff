@@ -22,7 +22,7 @@ from ..errors import (
     RateLimited,
     TransientProviderError,
 )
-from .base import Completion, ContentBlock, Message, Provider, ToolCall, ToolSpec, Usage
+from .base import Completion, Message, Provider, ToolCall, ToolSpec, Usage
 
 #: Признаки того, что кончилась квота/баланс, а не сработал обычный rate limit.
 _QUOTA_HINTS = ("credit balance", "quota", "billing", "insufficient", "spend limit")

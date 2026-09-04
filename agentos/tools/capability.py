@@ -45,9 +45,7 @@ class CapabilityStatus:
         return self.status == STATUS_ENABLED
 
     def as_line(self) -> str:
-        mark = {"enabled": "включено", "blocked": "нужно от человека"}.get(
-            self.status, self.status
-        )
+        mark = {"enabled": "включено", "blocked": "нужно от человека"}.get(self.status, self.status)
         tail = f" — {self.detail}" if self.detail else ""
         return f"- [{mark}] {self.kind}/{self.name}{tail}"
 
@@ -65,9 +63,7 @@ class CapabilityResolver:
     def list_all(self) -> list[CapabilityStatus]:
         """Что уже подключено и что ждёт человека."""
         rows = self.rt.store.query("SELECT * FROM capabilities ORDER BY kind, name")
-        return [
-            CapabilityStatus(r["kind"], r["name"], r["status"], r["detail"]) for r in rows
-        ]
+        return [CapabilityStatus(r["kind"], r["name"], r["status"], r["detail"]) for r in rows]
 
     def pending(self) -> list[CapabilityStatus]:
         return [c for c in self.list_all() if c.status == STATUS_BLOCKED]
@@ -146,12 +142,8 @@ class CapabilityResolver:
         except CapabilityMissing as exc:
             return CapabilityStatus(KIND_MCP, name, STATUS_BLOCKED, exc.how_to_fix)
         except Exception as exc:
-            return CapabilityStatus(
-                KIND_MCP, name, STATUS_BLOCKED, f"{type(exc).__name__}: {exc}"
-            )
-        return CapabilityStatus(
-            KIND_MCP, name, STATUS_ENABLED, f"подключено инструментов: {count}"
-        )
+            return CapabilityStatus(KIND_MCP, name, STATUS_BLOCKED, f"{type(exc).__name__}: {exc}")
+        return CapabilityStatus(KIND_MCP, name, STATUS_ENABLED, f"подключено инструментов: {count}")
 
     def enable_mcp(self, name: str) -> list[Tool]:
         """Поднять сервер и зарегистрировать его инструменты в реестре.
@@ -181,7 +173,7 @@ class CapabilityResolver:
         skill = self.rt.skills.load(name)
         if skill is not None:
             return CapabilityStatus(KIND_SKILL, name, STATUS_ENABLED, "навык найден")
-        proposed = self.rt.config.root / "skills" / "_proposed" / name / "SKILL.md"
+        proposed = self.rt.skills.skills_dir / "_proposed" / name / "SKILL.md"
         if proposed.exists():
             return CapabilityStatus(
                 KIND_SKILL,
@@ -206,9 +198,7 @@ class CapabilityResolver:
             if status.ok and self.rt.tools.get(name) is not None:
                 return CapabilityStatus(KIND_TOOL, name, STATUS_ENABLED, "подключён через MCP")
             return CapabilityStatus(KIND_TOOL, name, STATUS_BLOCKED, status.detail)
-        return CapabilityStatus(
-            KIND_TOOL, name, STATUS_BLOCKED, f"инструмента нет: {name}"
-        )
+        return CapabilityStatus(KIND_TOOL, name, STATUS_BLOCKED, f"инструмента нет: {name}")
 
     # ------------------------------------------------------------- хранение
     def _record(self, status: CapabilityStatus, mission_id: str = "") -> None:
@@ -234,7 +224,9 @@ def build_capability_tools(resolver: CapabilityResolver) -> list[Tool]:
     def capability_request(kind: str, name: str, reason: str = "") -> ToolResult:
         status = resolver.request(kind, name, reason=reason)
         if status.ok:
-            return ToolResult(True, output=f"подключено: {status.kind}/{status.name}. {status.detail}")
+            return ToolResult(
+                True, output=f"подключено: {status.kind}/{status.name}. {status.detail}"
+            )
         # Не ошибка исполнения, а сигнал оркестратору: задача ждёт человека.
         raise CapabilityMissing(status.kind, status.name, status.detail)
 

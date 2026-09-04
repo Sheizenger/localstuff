@@ -65,7 +65,9 @@ class ToolSpec:
 
     name: str
     description: str
-    input_schema: dict[str, Any] = field(default_factory=lambda: {"type": "object", "properties": {}})
+    input_schema: dict[str, Any] = field(
+        default_factory=lambda: {"type": "object", "properties": {}}
+    )
 
 
 @dataclass

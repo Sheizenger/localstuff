@@ -1,0 +1,45 @@
+name: CI
+
+# Секреты не нужны: ни один тест не ходит в сеть и не требует API-ключей.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установить uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Собрать окружение
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+
+      - name: Линтер
+        run: .venv/bin/ruff check agentos tests
+
+      - name: Типы
+        run: .venv/bin/mypy
+
+      - name: Проверка окружения
+        run: .venv/bin/agentctl doctor
+
+      - name: Тесты
+        run: .venv/bin/python -m pytest -m "not live" --cov=agentos --cov-report=term-missing
+
+      - name: Эталонные миссии
+        # Гейт против регрессий самоулучшения: система правит собственные
+        # промпты и навыки, ей нужна неподвижная точка отсчёта.
+        run: .venv/bin/agentctl eval run

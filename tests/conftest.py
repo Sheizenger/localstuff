@@ -6,7 +6,6 @@ mock-провайдер: тесты не должны видеть ни чужу
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -17,6 +16,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path, monkeypatch):
     """Изолировать состояние и включить mock до создания любого Runtime."""
+    import shutil
+
+    # Навыки — копия репозиторных: тесты предлагают и активируют черновики,
+    # и не должны для этого править рабочее дерево.
+    skills_copy = tmp_path / "skills"
+    shutil.copytree(REPO_ROOT / "skills", skills_copy)
+    monkeypatch.setenv("AGENTOS_SKILLS_DIR", str(skills_copy))
     monkeypatch.setenv("AGENTOS_HOME", str(tmp_path / "var"))
     monkeypatch.setenv("AGENTOS_ALLOW_MOCK", "1")
     monkeypatch.setenv("AGENTOS_MODE", "direct")

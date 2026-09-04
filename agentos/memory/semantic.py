@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .store import Store
-from .vector import BruteForceIndex, Embedder, pack, unpack
+from .vector import BruteForceIndex, Embedder, pack
 
 KIND_FACT = "fact"
 KIND_LESSON = "lesson"
@@ -210,11 +210,10 @@ class SemanticMemory:
         if not match:
             return []
         try:
+            kind_filter = f" AND f.kind IN ({','.join('?' * len(kinds))})" if kinds else ""
             rows = self.store.query(
                 "SELECT f.id AS id FROM facts_fts JOIN facts f ON f.rowid = facts_fts.rowid"
-                " WHERE facts_fts MATCH ?"
-                + (" AND f.kind IN (%s)" % ",".join("?" * len(kinds)) if kinds else "")
-                + " ORDER BY bm25(facts_fts) LIMIT ?",
+                f" WHERE facts_fts MATCH ?{kind_filter} ORDER BY bm25(facts_fts) LIMIT ?",
                 (match, *kinds, limit),
             )
         except Exception:

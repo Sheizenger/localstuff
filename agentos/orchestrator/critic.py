@@ -15,14 +15,13 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 from ..agents.report import Verdict
 from ..bus import EV_CRITIC_VERDICT, EV_GATE_RESULT
 from ..errors import ProviderUnavailable, QuotaExhausted
 from ..memory.working import GOAL_MARKER, SCHEMA_MARKER, truncate_to_tokens
 from ..providers.base import Message
-from ..runtime import MODE_NATIVE, Runtime
+from ..runtime import Runtime
 from ..tools.shell import run_command
 
 #: Сколько попыток исправления допускается до эскалации человеку.
@@ -172,8 +171,10 @@ class Critic:
             "КРИТЕРИИ ПРИЁМКИ:\n"
             + "\n".join(f"- {c['criterion']}" for c in semantic)
             + "\n\nПРОГРАММНЫЕ ГЕЙТЫ:\n"
-            + ("\n".join(f"- {g.cmd}: {'зелёный' if g.passed else 'ГЕЙТ ПРОВАЛЕН'}" for g in gates)
-               or "- нет")
+            + (
+                "\n".join(f"- {g.cmd}: {'зелёный' if g.passed else 'ГЕЙТ ПРОВАЛЕН'}" for g in gates)
+                or "- нет"
+            )
             + f"\n\nЧТО СДЕЛАНО:\n{evidence}\n\n"
             f"{SCHEMA_MARKER} verdict\n"
             'Верни JSON: {"verdict": "accept|reject|needs_human", "reasons": [], '
@@ -216,7 +217,8 @@ class Critic:
         status = {"accept": "pass", "reject": "fail"}.get(verdict.verdict, "pending")
         with self.rt.store.tx() as conn:
             conn.execute(
-                "UPDATE dod SET status=?, updated_at=? WHERE mission_id=? AND kind != 'programmatic'",
+                "UPDATE dod SET status=?, updated_at=? WHERE mission_id=?"
+                " AND kind != 'programmatic'",
                 (status, time.time(), mission_id),
             )
 

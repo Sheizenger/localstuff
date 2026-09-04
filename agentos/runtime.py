@@ -100,7 +100,12 @@ class Runtime:
 
     @cached_property
     def skills(self) -> SkillLibrary:
-        return SkillLibrary(self.store, self.config.root / "skills")
+        # AGENTOS_SKILLS_DIR позволяет увести навыки в отдельный каталог —
+        # это нужно тестам и параллельным прогонам, чтобы они не писали
+        # черновики в общий skills/ репозитория.
+        override = os.environ.get("AGENTOS_SKILLS_DIR")
+        path = Path(override) if override else self.config.root / "skills"
+        return SkillLibrary(self.store, path)
 
     @cached_property
     def artifacts(self) -> ArtifactStore:

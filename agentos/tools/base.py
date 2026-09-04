@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..bus import EV_TOOL_CALL, EventBus
 from ..errors import ApprovalRequired, CapabilityMissing, PolicyDenied

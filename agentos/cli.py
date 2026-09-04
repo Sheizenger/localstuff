@@ -14,7 +14,6 @@ import os
 import signal
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -112,7 +111,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
         out("")
         out("Каталог моделей:")
-        unverified = [m for m in rt.config.models if not m.pricing_verified and m.provider != "mock"]
+        unverified = [
+            m for m in rt.config.models if not m.pricing_verified and m.provider != "mock"
+        ]
         for tier in ("reasoning", "large", "small", "nano"):
             chain = [f"{m.provider}/{m.id}" for m in rt.config.models_for_tier(tier)]
             out(f"  {tier:9s} {' -> '.join(chain) or '(пусто)'}")
@@ -148,8 +149,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 problems.append(f"гейт '{gate.get('name')}' запрещён политикой: {verdict.reason}")
         if not (rt.config.root / ".venv").exists():
             warnings.append(
-                "нет .venv — гейты 'make test'/'make lint' будут падать."
-                " Запусти: make bootstrap"
+                "нет .venv — гейты 'make test'/'make lint' будут падать. Запусти: make bootstrap"
             )
 
         out("")
@@ -405,7 +405,10 @@ def cmd_task_block(args: argparse.Namespace) -> int:
         )
         rt.checkpointer.write(task.mission_id)
         if resume_after:
-            out(f"задача {task.id} ждёт до {human_seconds(resume_after - time.time())} и продолжит сама")
+            out(
+                f"задача {task.id} ждёт {human_seconds(resume_after - time.time())}"
+                " и продолжит сама"
+            )
         else:
             out(f"задача {task.id}: {target.value} — {args.detail}")
         return 0
@@ -446,14 +449,19 @@ def cmd_task_show(args: argparse.Namespace) -> int:
 def cmd_mission_list(args: argparse.Namespace) -> int:
     rt = _runtime(args)
     try:
-        rows = rt.store.query("SELECT * FROM missions ORDER BY created_at DESC LIMIT ?", (args.limit,))
+        rows = rt.store.query(
+            "SELECT * FROM missions ORDER BY created_at DESC LIMIT ?", (args.limit,)
+        )
         if not rows:
             out("миссий нет")
             return 0
         for row in rows:
             counts = rt.sm.status_counts(row["id"])
             done = counts.get("DONE", 0)
-            out(f"{row['id']}  [{row['status']:9s}] {done}/{sum(counts.values())}  {row['goal'][:60]}")
+            out(
+                f"{row['id']}  [{row['status']:9s}] {done}/{sum(counts.values())}"
+                f"  {row['goal'][:60]}"
+            )
         return 0
     finally:
         rt.close()
@@ -483,7 +491,9 @@ def cmd_mission_dod(args: argparse.Namespace) -> int:
     try:
         if args.add:
             dod_id = Intake(rt).add_criterion(
-                args.mission_id, args.add, kind="programmatic" if args.cmd else "semantic",
+                args.mission_id,
+                args.add,
+                kind="programmatic" if args.cmd else "semantic",
                 cmd=args.cmd or "",
             )
             out(f"добавлен критерий {dod_id}")
@@ -536,7 +546,8 @@ def cmd_agents_sync(args: argparse.Namespace) -> int:
             body = f"""---
 name: agentos-{role.name}
 description: {role.goal} Тир {role.tier}, приоритет {role.priority}.{
-    (' Триггеры: ' + ', '.join(role.triggers) + '.') if role.triggers else ''}
+                (" Триггеры: " + ", ".join(role.triggers) + ".") if role.triggers else ""
+            }
 ---
 
 {role.system}
@@ -812,7 +823,9 @@ def build_parser() -> argparse.ArgumentParser:
     madd = memory_sub.add_parser("add")
     madd.add_argument("content")
     madd.add_argument("--subject", default="")
-    madd.add_argument("--kind", default="fact", choices=["fact", "lesson", "decision", "preference"])
+    madd.add_argument(
+        "--kind", default="fact", choices=["fact", "lesson", "decision", "preference"]
+    )
     madd.set_defaults(func=cmd_memory)
     memory_sub.add_parser("stats").set_defaults(func=cmd_memory)
 

@@ -11,14 +11,14 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from ..errors import InvalidTransition
 from ..memory.store import Store
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     PENDING = "PENDING"                        # создана, зависимости не готовы
     READY = "READY"                            # можно брать в работу
     RUNNING = "RUNNING"                        # взята исполнителем
@@ -30,7 +30,7 @@ class TaskStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
-class MissionStatus(str, Enum):
+class MissionStatus(StrEnum):
     PLANNING = "PLANNING"
     RUNNING = "RUNNING"
     VERIFYING = "VERIFYING"      # результат собран, работает критик и гейты
@@ -276,7 +276,9 @@ class StateMachine:
 
     def _assert_transition(self, current: TaskStatus, target: TaskStatus) -> None:
         if target not in TASK_TRANSITIONS[current]:
-            raise InvalidTransition(f"недопустимый переход задачи: {current.value} -> {target.value}")
+            raise InvalidTransition(
+                f"недопустимый переход задачи: {current.value} -> {target.value}"
+            )
 
     def transition(
         self,
@@ -357,14 +359,12 @@ class StateMachine:
         и одну задачу не должны взять двое.
         """
         with self.store.tx() as conn:
+            role_filter = (
+                f" AND role IN ({','.join('?' * len(roles))})" if roles else ""
+            )
             sql = (
                 "SELECT * FROM tasks WHERE mission_id=? AND status=?"
-                + (
-                    " AND role IN (%s)" % ",".join("?" * len(roles))
-                    if roles
-                    else ""
-                )
-                + " ORDER BY priority, created_at LIMIT 1"
+                f"{role_filter} ORDER BY priority, created_at LIMIT 1"
             )
             params: list[Any] = [mission_id, TaskStatus.READY.value, *(roles or [])]
             row = conn.execute(sql, tuple(params)).fetchone()

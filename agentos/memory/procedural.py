@@ -83,7 +83,12 @@ class SkillLibrary:
         seen: set[str] = set()
         added = updated = 0
         if self.skills_dir.exists():
-            for skill_md in sorted(self.skills_dir.glob("*/SKILL.md")):
+            # Активные навыки — skills/<имя>/SKILL.md, черновики на уровень
+            # глубже — skills/_proposed/<имя>/SKILL.md.
+            found = sorted(
+                [*self.skills_dir.glob("*/SKILL.md"), *self.skills_dir.glob("_proposed/*/SKILL.md")]
+            )
+            for skill_md in found:
                 meta, _body = parse_skill_file(skill_md)
                 name = str(meta.get("name") or skill_md.parent.name)
                 status = (

@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -203,7 +202,7 @@ class Improver:
         """Записать черновик навыка в skills/_proposed/<name>/SKILL.md."""
         if not name or not body.strip():
             return None
-        target = self.rt.config.root / "skills" / "_proposed" / name
+        target = self.rt.skills.skills_dir / "_proposed" / name
         target.mkdir(parents=True, exist_ok=True)
         path = target / "SKILL.md"
         path.write_text(
@@ -230,10 +229,10 @@ class Improver:
 
     def promote_skill(self, name: str) -> bool:
         """Перевести черновик в активные навыки."""
-        source = self.rt.config.root / "skills" / "_proposed" / name / "SKILL.md"
+        source = self.rt.skills.skills_dir / "_proposed" / name / "SKILL.md"
         if not source.exists():
             return False
-        target_dir = self.rt.config.root / "skills" / name
+        target_dir = self.rt.skills.skills_dir / name
         target_dir.mkdir(parents=True, exist_ok=True)
         text = source.read_text(encoding="utf-8").replace("status: proposed", "status: active")
         (target_dir / "SKILL.md").write_text(text, encoding="utf-8")
@@ -246,7 +245,7 @@ class Improver:
         return True
 
     def proposed(self) -> list[str]:
-        root = self.rt.config.root / "skills" / "_proposed"
+        root = self.rt.skills.skills_dir / "_proposed"
         return sorted(p.parent.name for p in root.glob("*/SKILL.md")) if root.exists() else []
 
     @staticmethod

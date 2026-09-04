@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from typing import Any
 
 from ..errors import (
@@ -189,11 +188,11 @@ class OpenAIProvider(Provider):
             return TransientProviderError(message, provider=self.name, model=model)
         if isinstance(exc, (openai.AuthenticationError, openai.PermissionDeniedError)):
             return ProviderUnavailable(message, provider=self.name, model=model)
-        if isinstance(exc, openai.APIStatusError):
-            if int(getattr(exc, "status_code", 0) or 0) == 402 or any(
-                hint in lowered for hint in _QUOTA_HINTS
-            ):
-                return QuotaExhausted(message, provider=self.name, model=model)
+        if isinstance(exc, openai.APIStatusError) and (
+            int(getattr(exc, "status_code", 0) or 0) == 402
+            or any(hint in lowered for hint in _QUOTA_HINTS)
+        ):
+            return QuotaExhausted(message, provider=self.name, model=model)
         return TransientProviderError(message, provider=self.name, model=model)
 
     # ------------------------------------------------------------ эмбеддинги

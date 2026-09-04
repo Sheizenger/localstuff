@@ -137,7 +137,9 @@ class Intake:
         return MissionSpec(
             goal=goal,
             assumptions=["постановка уточнена не моделью, а по умолчанию"],
-            acceptance=[{"criterion": f"результат отвечает цели: {goal}", "kind": "semantic", "cmd": ""}],
+            acceptance=[
+                {"criterion": f"результат отвечает цели: {goal}", "kind": "semantic", "cmd": ""}
+            ],
         )
 
     # -------------------------------------------------------------- хранение
@@ -171,7 +173,8 @@ class Intake:
                 conn.execute(
                     "UPDATE missions SET context = context || ? WHERE id=?",
                     (
-                        "\nдопущения: " + "; ".join(spec.assumptions)
+                        "\nдопущения: "
+                        + "; ".join(spec.assumptions)
                         + ("\nвопросы: " + "; ".join(spec.questions) if spec.questions else ""),
                         mission_id,
                     ),

@@ -36,7 +36,12 @@ def load_cases(root: Path) -> list[dict[str, Any]]:
                 doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             except yaml.YAMLError as exc:
                 cases.append(
-                    {"name": path.stem, "goal": "", "expect": {}, "_error": f"невалидный YAML: {exc}"}
+                    {
+                        "name": path.stem,
+                        "goal": "",
+                        "expect": {},
+                        "_error": f"невалидный YAML: {exc}",
+                    }
                 )
                 continue
             doc.setdefault("name", path.stem)
@@ -53,7 +58,9 @@ def run_evals(runtime: Any, *, only: str = "") -> dict[str, Any]:
     cases = [c for c in load_cases(root) if not only or only in str(c.get("name", ""))]
     results: list[dict[str, Any]] = []
 
-    saved_env = {k: os.environ.get(k) for k in ("AGENTOS_HOME", "AGENTOS_ALLOW_MOCK", "AGENTOS_MODE")}
+    saved_env = {
+        k: os.environ.get(k) for k in ("AGENTOS_HOME", "AGENTOS_ALLOW_MOCK", "AGENTOS_MODE")
+    }
     try:
         for case in cases:
             results.append(_run_case(case, root, Runtime, Supervisor))
@@ -94,8 +101,8 @@ def _run_case(case: dict[str, Any], root: Path, Runtime: Any, Supervisor: Any) -
             return {
                 "name": name,
                 "passed": not failures,
-                "detail": "; ".join(failures) or f"выполнено задач: {counts.get('DONE', 0)},"
-                f" токенов: {spend.tokens}",
+                "detail": "; ".join(failures)
+                or f"выполнено задач: {counts.get('DONE', 0)}, токенов: {spend.tokens}",
                 "counts": counts,
                 "tokens": spend.tokens,
                 "status": result.status,

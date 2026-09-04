@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import ContextOverflow, QuotaExhausted, RateLimited, TransientProviderError
-from .base import Completion, Message, Provider, ToolCall, ToolSpec, Usage
+from .base import Completion, Message, Provider, ToolSpec, Usage
 
 #: Маркеры, по которым mock понимает, какой ответ от него ждут.
 SCHEMA_MARKER = "ФОРМАТ ОТВЕТА:"
