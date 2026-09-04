@@ -20,6 +20,7 @@ struct TransactionsView: View {
     @State private var tab: Tab = .operations
     @State private var query: String = ""
     @State private var editingTxn: Txn? = nil
+    @State private var expandedReceiptID: UUID? = nil
 
     private var currency: String { store.currency }
 
@@ -82,6 +83,13 @@ struct TransactionsView: View {
             TextField("Поиск по заметке или категории", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 260)
+
+            Button {
+                bus.showReceiptImport = true
+            } label: {
+                Label("Чек", systemImage: "doc.viewfinder")
+            }
+            .help("Распознать чек из снимка или PDF (⌘I)")
 
             Button {
                 bus.showAddTransaction = true
@@ -177,13 +185,39 @@ struct TransactionsView: View {
                             .foregroundStyle(Palette.muted)
                     }
                     ForEach(group.items) { txn in
-                        TransactionRow(txn: txn, currency: currency, category: store.analytics.category(for: txn))
-                            .contentShape(Rectangle())
-                            .onTapGesture { editingTxn = txn }
-                            .contextMenu {
-                                Button("Изменить") { editingTxn = txn }
-                                Button("Удалить", role: .destructive) { store.deleteTransaction(txn) }
+                        VStack(alignment: .leading, spacing: 6) {
+                            TransactionRow(txn: txn, currency: currency, category: store.analytics.category(for: txn))
+                                .contentShape(Rectangle())
+                                .onTapGesture { editingTxn = txn }
+                                .contextMenu {
+                                    Button("Изменить") { editingTxn = txn }
+                                    Button("Удалить", role: .destructive) { store.deleteTransaction(txn) }
+                                }
+
+                            if txn.hasReceipt {
+                                Button {
+                                    expandedReceiptID = expandedReceiptID == txn.id ? nil : txn.id
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: expandedReceiptID == txn.id ? "chevron.down" : "chevron.right")
+                                            .font(.system(size: 9, weight: .bold))
+                                        Image(systemName: "doc.text")
+                                            .font(.system(size: 10))
+                                        Text("чек, позиций: \(txn.receiptLines.count)")
+                                            .font(.caption2)
+                                    }
+                                    .foregroundStyle(Palette.teal)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.leading, 46)
+
+                                if expandedReceiptID == txn.id {
+                                    ReceiptBreakdownView(lines: txn.receiptLines, currency: currency)
+                                        .padding(.leading, 46)
+                                        .padding(.bottom, 4)
+                                }
                             }
+                        }
                         if txn.id != group.items.last?.id {
                             Divider().opacity(0.4)
                         }
@@ -292,5 +326,79 @@ struct TransactionRow: View {
                 .frame(minWidth: 90, alignment: .trailing)
         }
         .padding(.vertical, 3)
+    }
+}
+
+/// Что лежит внутри операции, пришедшей из чека: суммы по категориям и сами позиции.
+struct ReceiptBreakdownView: View {
+    var lines: [ReceiptLine]
+    var currency: String
+
+    private struct CategorySum: Identifiable {
+        let category: BasketCategory
+        let amount: Double
+        var id: String { category.rawValue }
+    }
+
+    private var groups: [CategorySum] {
+        BasketCategory.allCases
+            .compactMap { category in
+                let sum = lines.filter { $0.category == category }.reduce(0.0) { $0 + $1.amount }
+                return abs(sum) > 0.001 ? CategorySum(category: category, amount: sum) : nil
+            }
+            .sorted { $0.amount > $1.amount }
+    }
+
+    private var total: Double {
+        max(abs(lines.reduce(0.0) { $0 + $1.amount }), 0.01)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(groups) { group in
+                HStack(spacing: 8) {
+                    Text("\(group.category.emoji) \(group.category.title)")
+                        .font(.caption)
+                        .frame(width: 160, alignment: .leading)
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(Palette.basketColor(group.category).opacity(0.7))
+                            .frame(width: max(geo.size.width * CGFloat(abs(group.amount) / total), 3))
+                    }
+                    .frame(height: 7)
+                    Text(Fmt.money(group.amount, code: currency, fraction: true))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 74, alignment: .trailing)
+                }
+            }
+
+            Divider().opacity(0.3)
+
+            ForEach(lines) { line in
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Palette.basketColor(line.category))
+                        .frame(width: 5, height: 5)
+                    Text(line.name)
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    if line.quantity > 1.001 || line.quantity < 0.999 {
+                        Text(String(format: "×%.3g", line.quantity))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(Palette.muted)
+                    }
+                    Text(Fmt.money(line.amount, code: currency, fraction: true))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(line.isDiscount ? Palette.green : Palette.muted)
+                        .frame(width: 66, alignment: .trailing)
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+        )
     }
 }

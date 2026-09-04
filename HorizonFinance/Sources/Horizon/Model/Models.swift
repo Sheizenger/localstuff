@@ -129,9 +129,35 @@ struct Txn: Identifiable, Codable, Hashable {
     var flow: MoneyFlow = .expense
     var categoryID: UUID? = nil
     var note: String = ""
+    /// Магазин из чека, если операция пришла из распознавания.
+    var merchant: String = ""
+    /// Разбор чека: позиции с ценами и категориями. Пусто у обычных операций.
+    var receiptLines: [ReceiptLine] = []
 
     /// Со знаком: доход «+», расход «−».
     var signedAmount: Double { flow == .income ? amount : -amount }
+
+    var hasReceipt: Bool { !receiptLines.isEmpty }
+
+    enum CodingKeys: String, CodingKey {
+        case id, date, amount, flow, categoryID, note, merchant, receiptLines
+    }
+}
+
+extension Txn {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        var txn = Txn()
+        txn.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        txn.date = try container.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+        txn.amount = try container.decodeIfPresent(Double.self, forKey: .amount) ?? 0
+        txn.flow = try container.decodeIfPresent(MoneyFlow.self, forKey: .flow) ?? .expense
+        txn.categoryID = try container.decodeIfPresent(UUID.self, forKey: .categoryID)
+        txn.note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+        txn.merchant = try container.decodeIfPresent(String.self, forKey: .merchant) ?? ""
+        txn.receiptLines = try container.decodeIfPresent([ReceiptLine].self, forKey: .receiptLines) ?? []
+        self = txn
+    }
 }
 
 /// Перевод денег в цель (или изъятие из неё, если сумма отрицательная).
@@ -233,9 +259,12 @@ struct AppData: Codable {
     var transactions: [Txn] = []
     var contributions: [Contribution] = []
     var basket: BasketSettings = BasketSettings()
+    /// Чему научился разбор чеков: нормализованная строка из чека → товар справочника.
+    var receiptAliases: [String: String] = [:]
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, profile, categories, goals, transactions, contributions, basket
+        case schemaVersion, profile, categories, goals, transactions, contributions
+        case basket, receiptAliases
     }
 }
 
@@ -255,6 +284,7 @@ extension AppData {
         data.transactions = try container.decodeIfPresent([Txn].self, forKey: .transactions) ?? []
         data.contributions = try container.decodeIfPresent([Contribution].self, forKey: .contributions) ?? []
         data.basket = try container.decodeIfPresent(BasketSettings.self, forKey: .basket) ?? BasketSettings()
+        data.receiptAliases = try container.decodeIfPresent([String: String].self, forKey: .receiptAliases) ?? [:]
 
         if version < 2 {
             // Раньше режим распределения был один на все цели и лежал в профиле.

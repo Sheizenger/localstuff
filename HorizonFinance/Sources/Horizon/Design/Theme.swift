@@ -19,6 +19,19 @@ enum Palette {
     static func categoryColor(_ kind: SpendKind) -> Color {
         kind == .essential ? teal : violet
     }
+
+    /// Цвет категории корзины — один и тот же в корзине и в разборе чека.
+    static func basketColor(_ category: BasketCategory) -> Color {
+        switch category {
+        case .dairy: return accent
+        case .meat: return Color(hex: "#E8618C")
+        case .produce: return green
+        case .grocery: return teal
+        case .drinks: return Color(hex: "#12A5D8")
+        case .household: return violet
+        case .baby: return amber
+        }
+    }
 }
 
 extension Zone {

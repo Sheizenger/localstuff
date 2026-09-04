@@ -28,6 +28,10 @@ struct RootView: View {
             GoalEditor(mode: .create)
                 .environmentObject(store)
         }
+        .sheet(isPresented: $bus.showReceiptImport) {
+            ReceiptImportView()
+                .environmentObject(store)
+        }
         .sheet(item: $bus.contributionTarget) { goal in
             ContributionEditor(goal: goal)
                 .environmentObject(store)
@@ -103,6 +107,14 @@ struct RootView: View {
                 Label("Новая цель", systemImage: "target")
             }
             .help("Добавить цель накопления (⇧⌘N)")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                bus.showReceiptImport = true
+            } label: {
+                Label("Чек из магазина", systemImage: "doc.viewfinder")
+            }
+            .help("Распознать чек из снимка или PDF (⌘I)")
         }
         ToolbarItem(placement: .primaryAction) {
             Button {

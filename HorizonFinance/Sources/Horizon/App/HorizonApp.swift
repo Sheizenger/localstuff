@@ -27,6 +27,9 @@ struct HorizonApp: App {
                     .keyboardShortcut("n", modifiers: [.command])
                 Button("Новая цель") { bus.showAddGoal = true }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
+                Divider()
+                Button("Чек из магазина…") { bus.showReceiptImport = true }
+                    .keyboardShortcut("i", modifiers: [.command])
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Настройки…") { bus.section = .settings }

@@ -177,6 +177,96 @@ final class Store: ObservableObject {
         data.categories.filter { $0.flow == flow && !$0.isArchived }
     }
 
+    // MARK: Чеки
+
+    /// Запоминает, каким товаром пользователь считает эту строку чека.
+    func rememberAlias(text: String, productID: String) {
+        let key = ProductMatcher.aliasKey(for: text)
+        guard !key.isEmpty else { return }
+        data.receiptAliases[key] = productID
+    }
+
+    func category(named name: String, flow: MoneyFlow) -> Category? {
+        data.categories.first(where: { $0.flow == flow && $0.name.caseInsensitiveCompare(name) == .orderedSame })
+    }
+
+    /// Записывает разобранный чек в операции.
+    ///
+    /// По умолчанию это одна операция «Продукты», внутри которой лежат все позиции.
+    /// Если попросили разнести — бытовое и алкоголь уходят отдельной свободной тратой,
+    /// потому что в приложении именно они съедают месячный лимит.
+    @discardableResult
+    func importReceipt(_ receipt: ParsedReceipt, splitFlexible: Bool, updateBasketPrices: Bool) -> [Txn] {
+        let date = receipt.date ?? Date()
+        let merchant = receipt.merchantName
+        var note = merchant.isEmpty ? "Чек" : "Чек: \(merchant)"
+        if let code = receipt.receiptCode { note += " · \(code)" }
+
+        let flexibleLines = receipt.lines.filter { $0.category == .household || $0.productID == "alcohol" }
+        let foodLines = receipt.lines.filter { !($0.category == .household || $0.productID == "alcohol") }
+        let flexibleTotal = flexibleLines.reduce(0.0) { $0 + $1.amount }
+
+        var created: [Txn] = []
+
+        if splitFlexible && flexibleTotal > 0.01 && !foodLines.isEmpty {
+            let foodTotal = foodLines.reduce(0.0) { $0 + $1.amount }
+
+            var food = Txn()
+            food.date = date
+            food.amount = (foodTotal * 100).rounded() / 100
+            food.flow = .expense
+            food.categoryID = category(named: "Продукты", flow: .expense)?.id
+            food.note = note
+            food.merchant = merchant
+            food.receiptLines = foodLines
+            created.append(food)
+
+            var flexible = Txn()
+            flexible.date = date
+            flexible.amount = (flexibleTotal * 100).rounded() / 100
+            flexible.flow = .expense
+            flexible.categoryID = category(named: "Дом и обустройство", flow: .expense)?.id
+                ?? categories(for: .expense).first(where: { $0.kind == .flexible })?.id
+            flexible.note = note + " · бытовое и напитки"
+            flexible.merchant = merchant
+            flexible.receiptLines = flexibleLines
+            created.append(flexible)
+        } else {
+            var txn = Txn()
+            txn.date = date
+            txn.amount = (receipt.amountToRecord * 100).rounded() / 100
+            txn.flow = .expense
+            txn.categoryID = category(named: "Продукты", flow: .expense)?.id
+            txn.note = note
+            txn.merchant = merchant
+            txn.receiptLines = receipt.lines
+            created.append(txn)
+        }
+
+        for txn in created where txn.amount > 0 {
+            data.transactions.append(txn)
+        }
+        data.transactions.sort { $0.date > $1.date }
+
+        if updateBasketPrices, let chainID = receipt.chainID {
+            applyReceiptPrices(receipt, chainID: chainID)
+        }
+
+        return created
+    }
+
+    /// Цены с реального чека важнее модельных — переносим их в корзину.
+    private func applyReceiptPrices(_ receipt: ParsedReceipt, chainID: String) {
+        for line in receipt.lines {
+            guard !line.isDiscount, let productID = line.productID else { continue }
+            guard line.quantity > 0.0001, line.amount > 0 else { continue }
+            let unit = (line.unitPrice * 100).rounded() / 100
+            guard unit > 0.01, unit < 500 else { continue }
+            let key = BasketSettings.overrideKey(chainID: chainID, productID: productID)
+            data.basket.priceOverrides[key] = unit
+        }
+    }
+
     // MARK: Данные целиком
 
     func loadDemoData() {

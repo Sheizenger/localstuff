@@ -54,6 +54,7 @@ enum SelfCheck {
         checkForecastShares()
         checkForecastMixed()
         checkBasket()
+        checkReceipts()
         checkMigration()
         checkFormatting()
 
@@ -379,6 +380,88 @@ enum SelfCheck {
         }
         expect(brokenLinks.isEmpty, "города региональных сетей есть в справочнике",
                brokenLinks.joined(separator: ", "))
+    }
+
+    /// Разбор чека проверяется на образце, похожем на настоящий испанский ticket:
+    /// шапка, штучные и весовые позиции, скидка, итог, служебные строки и QR TicketBAI.
+    private static func checkReceipts() {
+        print("\nРазбор чека:")
+
+        let lines = [
+            "MERCADONA S.A.",
+            "C/ GRAN VIA 12  BILBAO",
+            "NIF: A-46103834",
+            "FACTURA SIMPLIFICADA: 1234-567-890123",
+            "12/09/2026  18:42",
+            "1 LECHE ENTERA 1L  1,05",
+            "2 YOGUR NATURAL  1,55  3,10",
+            "0,462 kg x 7,60 EUR/kg  POLLO PECHUGA  3,51",
+            "1 PAPEL HIGIENICO 8R  4,60",
+            "1 CERVEZA PACK 6  4,80",
+            "DTO PROMOCION  -0,50",
+            "TOTAL  16,56",
+            "TARJETA  16,56",
+            "IVA 10%  BASE 12,00  CUOTA 1,20",
+            "TicketBAI: TBAI-A46103834-120926-ABC123"
+        ]
+        let document = ScannedDocument(
+            lines: lines,
+            codes: ["https://batuz.eus/QRTBAI/?id=TBAI-A46103834-120926-XYZ&s=1"],
+            usedOCR: true
+        )
+        let receipt = ReceiptParser.parse(document, aliases: [:])
+
+        expect(receipt.chainID == "es_mercadona", "магазин узнаётся по шапке", receipt.merchantName)
+        expect(receipt.sellerTaxID == "A46103834", "налоговый номер берётся из QR")
+        if let date = receipt.date {
+            let parts = Cal.ru.dateComponents([.year, .month, .day], from: date)
+            expect(parts.day == 12 && parts.month == 9 && parts.year == 2026, "дата берётся из QR TicketBAI")
+        } else {
+            expect(false, "дата определяется")
+        }
+
+        expect(receipt.lines.count == 6, "разобрано шесть позиций", "получилось \(receipt.lines.count)")
+        expect(near(receipt.printedTotal ?? 0, 16.56), "итог из чека прочитан")
+        expect(near(receipt.linesTotal, 16.56), "сумма позиций сходится с итогом", "\(receipt.linesTotal)")
+        expect(receipt.isConsistent, "чек считается согласованным")
+
+        expect(!receipt.lines.contains(where: { ReceiptParser.isServiceLine($0.raw) }),
+               "служебные строки (IVA, TARJETA, TBAI) не попали в позиции")
+
+        let milk = receipt.lines.first(where: { $0.productID == "milk" })
+        expect(milk != nil && milk?.category == .dairy, "молоко узнано и отнесено к молочному")
+
+        let chicken = receipt.lines.first(where: { $0.productID == "chicken" })
+        expect(chicken != nil && near(chicken?.quantity ?? 0, 0.462, 0.001),
+               "весовая позиция берёт килограммы как количество",
+               "\(String(describing: chicken?.quantity))")
+
+        let paper = receipt.lines.first(where: { $0.productID == "toiletpaper" })
+        expect(paper?.category == .household, "туалетная бумага — бытовое, а не еда")
+
+        let beer = receipt.lines.first(where: { $0.productID == "alcohol" })
+        expect(beer?.category == .drinks, "пиво распознано")
+        expect(near(receipt.flexiblePart, 9.40), "свободная часть чека — бытовое и алкоголь",
+               "\(receipt.flexiblePart)")
+
+        let discount = receipt.lines.first(where: { $0.isDiscount })
+        expect(discount != nil && (discount?.amount ?? 0) < 0, "скидка записана со знаком минус")
+
+        // Ручное исправление запоминается и срабатывает в следующий раз.
+        let custom = ScannedDocument(lines: ["1 PRODUCTO RARO XYZ  3,20"], codes: [], usedOCR: true)
+        let withoutAlias = ReceiptParser.parse(custom, aliases: [:])
+        expect(withoutAlias.lines.first?.productID == nil, "незнакомая строка остаётся без товара")
+
+        let key = ProductMatcher.aliasKey(for: "PRODUCTO RARO XYZ")
+        let withAlias = ReceiptParser.parse(custom, aliases: [key: "coffee"])
+        expect(withAlias.lines.first?.productID == "coffee", "запомненное исправление применяется")
+
+        // Названия сетей ищутся по целым словам.
+        expect(!ReceiptParser.containsWord("compra media semana", "dia"), "«Dia» не находится внутри «media»")
+        expect(ReceiptParser.containsWord("supermercado dia express", "dia"), "«Dia» находится как отдельное слово")
+
+        expect(ProductMatcher.normalize("LECHE ENT. 1L") == "leche ent l", "нормализация строки чека",
+               ProductMatcher.normalize("LECHE ENT. 1L"))
     }
 
     /// Файлы первой версии не знали про режим у цели — проверяем, что они читаются
