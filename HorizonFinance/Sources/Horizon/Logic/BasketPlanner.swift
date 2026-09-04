@@ -120,9 +120,10 @@ enum BasketPlanner {
         let city = BasketCatalog.city(countryID: settings.countryID, cityID: settings.cityID)
         let household = settings.household
 
-        var chains = country.chains
+        // Сначала отсекаем сети, которых в этом городе нет, и только потом применяем выбор.
+        var chains = BasketCatalog.availableChains(countryID: settings.countryID, cityID: city.id)
         if !settings.selectedChainIDs.isEmpty {
-            let picked = country.chains.filter { settings.selectedChainIDs.contains($0.id) }
+            let picked = chains.filter { settings.selectedChainIDs.contains($0.id) }
             if !picked.isEmpty { chains = picked }
         }
 

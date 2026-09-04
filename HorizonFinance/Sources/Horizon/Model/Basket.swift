@@ -117,17 +117,33 @@ struct StoreChain: Identifiable, Hashable {
     let baseIndex: Double
     /// Где сеть заметно отличается от своего же среднего уровня.
     let categoryIndex: [BasketCategory: Double]
+    /// Города, где сеть реально представлена. Пусто — сеть есть по всей стране.
+    let cityIDs: [String]
 
-    init(id: String, name: String, baseIndex: Double, categoryIndex: [BasketCategory: Double] = [:]) {
+    init(
+        id: String,
+        name: String,
+        baseIndex: Double,
+        categoryIndex: [BasketCategory: Double] = [:],
+        cityIDs: [String] = []
+    ) {
         self.id = id
         self.name = name
         self.baseIndex = baseIndex
         self.categoryIndex = categoryIndex
+        self.cityIDs = cityIDs
     }
 
     func index(for category: BasketCategory) -> Double {
         categoryIndex[category] ?? baseIndex
     }
+
+    func isAvailable(in cityID: String) -> Bool {
+        cityIDs.isEmpty || cityIDs.contains(cityID)
+    }
+
+    /// Региональные сети подписываем, чтобы не выглядело, будто список городов случаен.
+    var isRegional: Bool { !cityIDs.isEmpty }
 }
 
 struct BasketCity: Identifiable, Hashable {
@@ -168,7 +184,7 @@ struct Household: Hashable {
 
 struct BasketSettings: Codable, Hashable {
     var countryID: String = "ES"
-    var cityID: String = "madrid"
+    var cityID: String = "bilbao"
     var adults: Int = 2
     var infants: Int = 0
     var preschoolers: Int = 0
@@ -203,7 +219,7 @@ extension BasketSettings {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         var settings = BasketSettings()
         settings.countryID = try container.decodeIfPresent(String.self, forKey: .countryID) ?? "ES"
-        settings.cityID = try container.decodeIfPresent(String.self, forKey: .cityID) ?? "madrid"
+        settings.cityID = try container.decodeIfPresent(String.self, forKey: .cityID) ?? "bilbao"
         settings.adults = try container.decodeIfPresent(Int.self, forKey: .adults) ?? 2
         settings.infants = try container.decodeIfPresent(Int.self, forKey: .infants) ?? 0
         settings.preschoolers = try container.decodeIfPresent(Int.self, forKey: .preschoolers) ?? 0

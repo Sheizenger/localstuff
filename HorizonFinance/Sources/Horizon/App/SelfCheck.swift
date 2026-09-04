@@ -307,11 +307,42 @@ enum SelfCheck {
         let trimmedPlan = BasketPlanner.plan(settings: trimmed)
         expect(!trimmedPlan.lines.contains(where: { $0.product.id == "coffee" }), "исключённый товар не считается")
 
+        // Региональные сети показываются только там, где работают.
+        let bilbao = BasketCatalog.availableChains(countryID: "ES", cityID: "bilbao").map { $0.id }
+        let sevilla = BasketCatalog.availableChains(countryID: "ES", cityID: "sevilla").map { $0.id }
+        let valencia = BasketCatalog.availableChains(countryID: "ES", cityID: "valencia").map { $0.id }
+        expect(bilbao.contains("es_eroski") && bilbao.contains("es_bm"), "в Бильбао есть Eroski и BM")
+        expect(!bilbao.contains("es_consum"), "Consum в Бильбао не показывается")
+        expect(!sevilla.contains("es_eroski") && !sevilla.contains("es_bm"), "северных сетей нет в Севилье")
+        expect(valencia.contains("es_consum"), "Consum есть в Валенсии")
+        expect(bilbao.contains("es_mercadona") && sevilla.contains("es_mercadona"), "федеральные сети есть везде")
+
+        // Выбор недоступной в городе сети не должен обнулять расчёт.
+        var moved = settings
+        moved.cityID = "sevilla"
+        moved.selectedChainIDs = ["es_eroski"]
+        let movedPlan = BasketPlanner.plan(settings: moved)
+        expect(!movedPlan.chains.isEmpty && !movedPlan.chains.contains(where: { $0.id == "es_eroski" }),
+               "недоступная сеть заменяется на доступные, а не ломает расчёт")
+
         // Справочник цел: уникальные идентификаторы и заполненные города.
         let ids = Set(BasketCatalog.products.map { $0.id })
         expect(ids.count == BasketCatalog.products.count, "идентификаторы товаров уникальны")
         expect(BasketCatalog.countries.allSatisfy { !$0.cities.isEmpty && !$0.chains.isEmpty },
                "у каждой страны есть города и сети")
+
+        let allChainIDs = BasketCatalog.countries.flatMap { $0.chains.map { $0.id } }
+        expect(Set(allChainIDs).count == allChainIDs.count, "идентификаторы сетей уникальны")
+
+        var brokenLinks: [String] = []
+        for country in BasketCatalog.countries {
+            let cityIDs = Set(country.cities.map { $0.id })
+            for chain in country.chains where !chain.cityIDs.allSatisfy({ cityIDs.contains($0) }) {
+                brokenLinks.append(chain.name)
+            }
+        }
+        expect(brokenLinks.isEmpty, "города региональных сетей есть в справочнике",
+               brokenLinks.joined(separator: ", "))
     }
 
     /// Файлы первой версии не знали про режим у цели — проверяем, что они читаются

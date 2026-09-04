@@ -24,6 +24,14 @@ enum BasketCatalog {
         return target.cities.first(where: { $0.id == cityID }) ?? target.cities[0]
     }
 
+    /// Сети, которые действительно работают в этом городе.
+    static func availableChains(countryID: String, cityID: String) -> [StoreChain] {
+        let target = country(id: countryID)
+        let resolved = target.cities.contains(where: { $0.id == cityID }) ? cityID : (target.cities.first?.id ?? "")
+        let available = target.chains.filter { $0.isAvailable(in: resolved) }
+        return available.isEmpty ? target.chains : available
+    }
+
     static let spain = BasketCountry(
         id: "ES",
         name: "Испания",
@@ -35,7 +43,8 @@ enum BasketCatalog {
             BasketCity(id: "sevilla", name: "Севилья", index: 0.95),
             BasketCity(id: "malaga", name: "Малага", index: 1.00),
             BasketCity(id: "alicante", name: "Аликанте", index: 0.97),
-            BasketCity(id: "bilbao", name: "Бильбао", index: 1.05),
+            // Страна Басков — один из самых дорогих регионов по продуктам.
+            BasketCity(id: "bilbao", name: "Бильбао", index: 1.07),
             BasketCity(id: "zaragoza", name: "Сарагоса", index: 0.96),
             BasketCity(id: "murcia", name: "Мурсия", index: 0.94),
             BasketCity(id: "palma", name: "Пальма-де-Майорка", index: 1.12),
@@ -57,8 +66,19 @@ enum BasketCatalog {
                        categoryIndex: [.baby: 0.94, .household: 0.96, .drinks: 0.97, .produce: 1.05]),
             StoreChain(id: "es_alcampo", name: "Alcampo", baseIndex: 0.97,
                        categoryIndex: [.meat: 0.93, .produce: 0.96, .household: 0.94]),
+            // Consum — кооператив Леванта: Валенсия, Аликанте, Мурсия, Каталония.
             StoreChain(id: "es_consum", name: "Consum", baseIndex: 1.01,
-                       categoryIndex: [.produce: 0.97, .meat: 0.99]),
+                       categoryIndex: [.produce: 0.97, .meat: 0.99],
+                       cityIDs: ["valencia", "alicante", "murcia", "barcelona"]),
+            // Eroski — баскский кооператив: север, Балеары, Каталония.
+            StoreChain(id: "es_eroski", name: "Eroski", baseIndex: 1.01,
+                       categoryIndex: [.meat: 0.96, .produce: 0.99, .household: 0.98,
+                                       .baby: 0.97, .dairy: 1.00],
+                       cityIDs: ["bilbao", "zaragoza", "barcelona", "palma", "madrid"]),
+            // BM (Uvesco) — Страна Басков и север, сильная свежая полка.
+            StoreChain(id: "es_bm", name: "BM Supermercados", baseIndex: 1.04,
+                       categoryIndex: [.meat: 0.98, .produce: 0.98, .dairy: 1.03, .grocery: 1.06],
+                       cityIDs: ["bilbao"]),
             StoreChain(id: "es_corteingles", name: "El Corte Inglés", baseIndex: 1.26,
                        categoryIndex: [.produce: 1.18, .meat: 1.20])
         ]

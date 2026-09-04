@@ -100,8 +100,9 @@ struct BasketView: View {
     }
 
     private var chainChips: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], alignment: .leading, spacing: 8) {
-            ForEach(plan.country.chains) { chain in
+        let available = BasketCatalog.availableChains(countryID: settings.countryID, cityID: settings.cityID)
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(available) { chain in
                 let isOn = settings.selectedChainIDs.contains(chain.id)
                 Button {
                     toggleChain(chain.id)
@@ -122,6 +123,9 @@ struct BasketView: View {
                     .foregroundStyle(isOn ? Palette.accent : Palette.ink)
                 }
                 .buttonStyle(.plain)
+                .help(chain.isRegional
+                      ? "\(chain.name) — региональная сеть, есть не во всех городах страны"
+                      : chain.name)
             }
         }
         .frame(maxWidth: 420)
@@ -383,6 +387,10 @@ struct BasketView: View {
             Label("Откуда цены", systemImage: "info.circle")
                 .font(.subheadline.weight(.semibold))
             Text("Это модель-ориентир, а не выгрузка из магазинов: справочная полочная цена умножается на уровень города и уровень сети по категории. Справочник пересматривался вручную — \(BasketCatalog.updatedAt). Приложение никуда не ходит по сети.")
+                .font(.caption)
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Список сетей зависит от города: региональные сети (Eroski и BM на севере, Consum в Леванте) показываются только там, где они действительно работают. Присутствие указано приблизительно, по крупным форматам.")
                 .font(.caption)
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
