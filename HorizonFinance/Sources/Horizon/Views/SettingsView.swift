@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var confirmReset = false
     @State private var confirmDemo = false
     @State private var message: String? = nil
+    @State private var editingRule: RecurringRule? = nil
+    @State private var showNewRule = false
 
     private let currencies = ["EUR", "USD", "RUB", "GBP", "PLN", "GEL", "TRY", "RSD"]
 
@@ -18,8 +20,17 @@ struct SettingsView: View {
             moneyCard
             planCard
             paceCard
+            recurringCard
             categoriesCard
             dataCard
+        }
+        .sheet(isPresented: $showNewRule) {
+            RecurringEditor(mode: .create)
+                .environmentObject(store)
+        }
+        .sheet(item: $editingRule) { rule in
+            RecurringEditor(mode: .edit(rule))
+                .environmentObject(store)
         }
         .alert("Сбросить все данные?", isPresented: $confirmReset) {
             Button("Отмена", role: .cancel) { }
@@ -161,6 +172,94 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .cardStyle()
+    }
+
+    // MARK: Регулярные операции
+
+    private var recurringCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                SectionTitle(
+                    title: "Регулярные операции",
+                    subtitle: "аренда, счета, подписки, зарплата — создаются сами, как только наступит дата"
+                )
+                Spacer()
+                Button {
+                    showNewRule = true
+                } label: {
+                    Label("Добавить", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            if store.data.recurring.isEmpty {
+                Text("Пока пусто. Заведите шаблон на аренду и подписки — и они перестанут отнимать время каждый месяц, а «Обзор» начнёт показывать, сколько ещё уйдёт до конца месяца.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(store.data.recurring) { rule in
+                    ruleRow(rule)
+                    if rule.id != store.data.recurring.last?.id {
+                        Divider().opacity(0.4)
+                    }
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private func ruleRow(_ rule: RecurringRule) -> some View {
+        let category = store.data.categories.first(where: { $0.id == rule.categoryID })
+        let next = RecurrenceEngine.next(for: rule)
+        return HStack(spacing: 12) {
+            Text(category?.emoji ?? (rule.flow == .income ? "💰" : "•"))
+                .font(.title3)
+                .frame(width: 32, height: 32)
+                .background(
+                    Circle().fill((rule.flow == .income ? Palette.green : Palette.teal).opacity(0.14))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rule.title)
+                    .font(.body)
+                Text(rule.scheduleTitle + (rule.autoCreate ? "" : " · только напоминание"))
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+
+            Spacer(minLength: 8)
+
+            if let next = next, rule.isActive {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("следующая")
+                        .font(.caption2)
+                        .foregroundStyle(Palette.muted)
+                    Text(Fmt.dayShort.string(from: next))
+                        .font(.caption)
+                }
+            } else if !rule.isActive {
+                Text("выключен")
+                    .font(.caption)
+                    .foregroundStyle(Palette.amber)
+            }
+
+            Text(Fmt.signedMoney(rule.signedAmount, code: store.currency))
+                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .foregroundStyle(rule.flow == .income ? Palette.green : Palette.ink)
+                .frame(width: 96, alignment: .trailing)
+
+            Button {
+                editingRule = rule
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+            }
+            .buttonStyle(.borderless)
+            .help("Изменить шаблон")
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .onTapGesture { editingRule = rule }
     }
 
     // MARK: Категории

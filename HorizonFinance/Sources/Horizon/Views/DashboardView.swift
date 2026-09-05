@@ -18,8 +18,68 @@ struct DashboardView: View {
                 zoneCard
                 paceCard
             }
+            upcomingCard
             horizonCard
             monthsCard
+        }
+    }
+
+    // MARK: Ожидаемое по шаблонам
+
+    @ViewBuilder
+    private var upcomingCard: some View {
+        let entries = store.upcomingThisMonth()
+        if !entries.isEmpty {
+            let net = store.upcomingNet()
+            let projected = analytics.thisMonth.net + net
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    SectionTitle(
+                        title: "Ожидается до конца месяца",
+                        subtitle: "по регулярным шаблонам — деньги, которые точно придут или уйдут"
+                    )
+                    Text(Fmt.signedMoney(net, code: currency))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(net >= 0 ? Palette.green : Palette.amber)
+                }
+
+                ForEach(entries.prefix(8)) { entry in
+                    HStack(spacing: 10) {
+                        Text(Fmt.daySimple.string(from: entry.date))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(Palette.muted)
+                            .frame(width: 92, alignment: .leading)
+                        Text(entry.rule.title)
+                            .font(.subheadline)
+                        if !entry.rule.autoCreate {
+                            Text("напоминание")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Palette.amber.opacity(0.15)))
+                                .foregroundStyle(Palette.amber)
+                        }
+                        Spacer(minLength: 8)
+                        Text(Fmt.signedMoney(entry.rule.signedAmount, code: currency))
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(entry.rule.flow == .income ? Palette.green : Palette.ink)
+                    }
+                }
+
+                Divider().opacity(0.4)
+
+                KeyValueRow(
+                    key: "Баланс месяца с учётом ожидаемого",
+                    value: Fmt.signedMoney(projected, code: currency),
+                    valueColor: projected >= 0 ? Palette.green : Palette.red,
+                    bold: true
+                )
+                Text("Пока аренда и счета не списаны, обычный баланс месяца выглядит лучше, чем есть. Эта строка показывает, чем месяц закончится.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .cardStyle()
         }
     }
 

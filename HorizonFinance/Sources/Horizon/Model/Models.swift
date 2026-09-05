@@ -133,6 +133,8 @@ struct Txn: Identifiable, Codable, Hashable {
     var merchant: String = ""
     /// Разбор чека: позиции с ценами и категориями. Пусто у обычных операций.
     var receiptLines: [ReceiptLine] = []
+    /// Шаблон, по которому операция создана автоматически.
+    var recurringID: UUID? = nil
 
     /// Со знаком: доход «+», расход «−».
     var signedAmount: Double { flow == .income ? amount : -amount }
@@ -140,7 +142,7 @@ struct Txn: Identifiable, Codable, Hashable {
     var hasReceipt: Bool { !receiptLines.isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case id, date, amount, flow, categoryID, note, merchant, receiptLines
+        case id, date, amount, flow, categoryID, note, merchant, receiptLines, recurringID
     }
 }
 
@@ -156,6 +158,7 @@ extension Txn {
         txn.note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
         txn.merchant = try container.decodeIfPresent(String.self, forKey: .merchant) ?? ""
         txn.receiptLines = try container.decodeIfPresent([ReceiptLine].self, forKey: .receiptLines) ?? []
+        txn.recurringID = try container.decodeIfPresent(UUID.self, forKey: .recurringID)
         self = txn
     }
 }
@@ -262,10 +265,14 @@ struct AppData: Codable {
     var basket: BasketSettings = BasketSettings()
     /// Чему научился разбор чеков: нормализованная строка из чека → товар справочника.
     var receiptAliases: [String: String] = [:]
+    /// Шаблоны повторяющихся операций: аренда, подписки, зарплата.
+    var recurring: [RecurringRule] = []
+    /// Чему научился импорт выписки: нормализованное описание → категория приложения.
+    var merchantRules: [String: UUID] = [:]
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion, profile, categories, goals, transactions, contributions
-        case basket, receiptAliases
+        case basket, receiptAliases, recurring, merchantRules
     }
 }
 
@@ -286,6 +293,8 @@ extension AppData {
         data.contributions = try container.decodeIfPresent([Contribution].self, forKey: .contributions) ?? []
         data.basket = try container.decodeIfPresent(BasketSettings.self, forKey: .basket) ?? BasketSettings()
         data.receiptAliases = try container.decodeIfPresent([String: String].self, forKey: .receiptAliases) ?? [:]
+        data.recurring = try container.decodeIfPresent([RecurringRule].self, forKey: .recurring) ?? []
+        data.merchantRules = try container.decodeIfPresent([String: UUID].self, forKey: .merchantRules) ?? [:]
 
         if version < 2 {
             // Раньше режим распределения был один на все цели и лежал в профиле.

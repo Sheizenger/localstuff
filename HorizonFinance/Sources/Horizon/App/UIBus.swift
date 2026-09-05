@@ -50,6 +50,7 @@ final class UIBus: ObservableObject {
     @Published var showAddTransaction: Bool = false
     @Published var showAddGoal: Bool = false
     @Published var showReceiptImport: Bool = false
+    @Published var showStatementImport: Bool = false
     /// Цель, для которой открыт диалог пополнения.
     @Published var contributionTarget: Goal? = nil
 }

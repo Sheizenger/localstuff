@@ -28,8 +28,16 @@ struct RootView: View {
             GoalEditor(mode: .create)
                 .environmentObject(store)
         }
+        .onAppear {
+            // Аренда и подписки известны заранее — создаём их сами, а не ждём ручного ввода.
+            store.applyRecurringRules()
+        }
         .sheet(isPresented: $bus.showReceiptImport) {
             ReceiptImportView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $bus.showStatementImport) {
+            StatementImportView()
                 .environmentObject(store)
         }
         .sheet(item: $bus.contributionTarget) { goal in

@@ -114,6 +114,13 @@ struct TransactionsView: View {
             .help("Распознать чек из снимка или PDF (⌘I)")
 
             Button {
+                bus.showStatementImport = true
+            } label: {
+                Label("Выписка", systemImage: "tablecells")
+            }
+            .help("Импортировать выписку банка из CSV (⇧⌘I)")
+
+            Button {
                 bus.showAddTransaction = true
             } label: {
                 Label("Добавить", systemImage: "plus")

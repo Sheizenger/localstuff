@@ -13,11 +13,14 @@ final class Store: ObservableObject {
     @Published private(set) var saveError: String? = nil
 
     private var saveWork: DispatchWorkItem? = nil
+    /// Самопроверка и предпросмотры работают с копией данных и ничего не пишут на диск.
+    private let persists: Bool
 
-    init(data: AppData? = nil) {
+    init(data: AppData? = nil, persists: Bool = true) {
+        self.persists = persists
         if let data = data {
             self.data = data
-        } else if let loaded = Persistence.load() {
+        } else if persists, let loaded = Persistence.load() {
             self.data = loaded
         } else {
             self.data = AppData.starter()
@@ -46,6 +49,7 @@ final class Store: ObservableObject {
     // MARK: Сохранение
 
     private func scheduleSave() {
+        guard persists else { return }
         saveWork?.cancel()
         let snapshot = data
         let work = DispatchWorkItem { [weak self] in
@@ -65,6 +69,7 @@ final class Store: ObservableObject {
     }
 
     func saveNow() {
+        guard persists else { return }
         saveWork?.cancel()
         let ok = Persistence.save(data)
         if ok {
@@ -177,6 +182,78 @@ final class Store: ObservableObject {
         data.categories.filter { $0.flow == flow && !$0.isArchived }
     }
 
+    // MARK: Повторяющиеся операции
+
+    /// Сколько операций создано при последнем прогоне шаблонов.
+    @Published private(set) var lastRunCreated: Int = 0
+
+    func addRule(_ rule: RecurringRule) {
+        data.recurring.append(rule)
+    }
+
+    func updateRule(_ rule: RecurringRule) {
+        guard let index = data.recurring.firstIndex(where: { $0.id == rule.id }) else { return }
+        data.recurring[index] = rule
+    }
+
+    func deleteRule(_ rule: RecurringRule) {
+        data.recurring.removeAll { $0.id == rule.id }
+    }
+
+    /// Создаёт операции по всем наступившим срабатываниям автоматических шаблонов.
+    /// Вызывается при запуске: аренда и подписки известны заранее, вбивать их руками незачем.
+    @discardableResult
+    func applyRecurringRules(now: Date = Date()) -> Int {
+        var created = 0
+
+        for index in data.recurring.indices {
+            let rule = data.recurring[index]
+            guard rule.isActive, rule.autoCreate, rule.amount > 0 else { continue }
+
+            let dates = RecurrenceEngine.pending(for: rule, now: now)
+            guard !dates.isEmpty else { continue }
+
+            for date in dates {
+                // Страховка от дублей, если файл перенесли или отметку сбросили.
+                let exists = data.transactions.contains {
+                    $0.recurringID == rule.id && Cal.ru.isDate($0.date, inSameDayAs: date)
+                }
+                if exists { continue }
+
+                var txn = Txn()
+                txn.date = date
+                txn.amount = rule.amount
+                txn.flow = rule.flow
+                txn.categoryID = rule.categoryID
+                txn.note = rule.note.isEmpty ? rule.title : rule.note
+                txn.recurringID = rule.id
+                data.transactions.append(txn)
+                created += 1
+            }
+
+            if let last = dates.last {
+                data.recurring[index].lastCreatedDate = last
+            }
+        }
+
+        if created > 0 {
+            data.transactions.sort { $0.date > $1.date }
+        }
+        lastRunCreated = created
+        return created
+    }
+
+    /// Ожидаемые срабатывания до конца текущего месяца.
+    func upcomingThisMonth(now: Date = Date()) -> [UpcomingEntry] {
+        let end = MonthKey(date: now).endDate
+        return RecurrenceEngine.upcoming(rules: data.recurring, now: now, through: end)
+    }
+
+    /// Сколько ещё придёт и уйдёт до конца месяца — со знаком.
+    func upcomingNet(now: Date = Date()) -> Double {
+        upcomingThisMonth(now: now).reduce(0.0) { $0 + $1.rule.signedAmount }
+    }
+
     // MARK: Чеки
 
     /// Запоминает, каким товаром пользователь считает эту строку чека.
@@ -268,6 +345,76 @@ final class Store: ObservableObject {
             let key = BasketSettings.overrideKey(chainID: chainID, productID: productID)
             data.basket.priceOverrides[key] = unit
         }
+    }
+
+    // MARK: Выписка банка
+
+    /// Подбирает категорию: сначала то, чему научили, потом общие правила.
+    func guessCategoryID(for details: String, amount: Double) -> UUID? {
+        let key = MerchantRules.ruleKey(for: details)
+        if let learned = data.merchantRules[key], data.categories.contains(where: { $0.id == learned }) {
+            return learned
+        }
+        guard let name = MerchantRules.categoryName(for: details, amount: amount) else { return nil }
+        let flow: MoneyFlow = amount >= 0 ? .income : .expense
+        return category(named: name, flow: flow)?.id
+    }
+
+    /// Запоминает ручной выбор, чтобы следующая выписка разобралась точнее.
+    func rememberMerchant(details: String, categoryID: UUID) {
+        let key = MerchantRules.ruleKey(for: details)
+        guard !key.isEmpty else { return }
+        data.merchantRules[key] = categoryID
+    }
+
+    /// Помечает строки, которые похожи на уже записанные операции.
+    func markDuplicates(in rows: [StatementRow]) -> [StatementRow] {
+        rows.map { row in
+            var row = row
+            let clash = data.transactions.contains { txn in
+                Cal.ru.isDate(txn.date, inSameDayAs: row.date)
+                    && abs(txn.amount - abs(row.amount)) < 0.005
+                    && txn.flow == row.flow
+            }
+            row.isDuplicate = clash
+            if clash { row.include = false }
+            return row
+        }
+    }
+
+    /// Готовит выписку к показу: категории и отметки дублей.
+    func prepare(_ statement: ParsedStatement) -> ParsedStatement {
+        var result = statement
+        result.rows = markDuplicates(in: statement.rows).map { row in
+            var row = row
+            row.categoryID = guessCategoryID(for: row.details, amount: row.amount)
+            return row
+        }
+        return result
+    }
+
+    @discardableResult
+    func importStatement(rows: [StatementRow]) -> Int {
+        var created = 0
+        for row in rows where row.include {
+            var txn = Txn()
+            txn.date = row.date
+            txn.amount = abs(row.amount)
+            txn.flow = row.flow
+            txn.categoryID = row.categoryID
+            txn.note = row.details
+            txn.merchant = row.details
+            data.transactions.append(txn)
+            created += 1
+
+            if let categoryID = row.categoryID {
+                rememberMerchant(details: row.details, categoryID: categoryID)
+            }
+        }
+        if created > 0 {
+            data.transactions.sort { $0.date > $1.date }
+        }
+        return created
     }
 
     // MARK: Данные целиком

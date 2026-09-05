@@ -30,6 +30,8 @@ struct HorizonApp: App {
                 Divider()
                 Button("Чек из магазина…") { bus.showReceiptImport = true }
                     .keyboardShortcut("i", modifiers: [.command])
+                Button("Выписка из банка…") { bus.showStatementImport = true }
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Настройки…") { bus.section = .settings }

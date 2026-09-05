@@ -55,6 +55,8 @@ enum SelfCheck {
         checkForecastMixed()
         checkBasket()
         checkReceipts()
+        checkRecurring()
+        checkStatement()
         checkMigration()
         checkFormatting()
 
@@ -462,6 +464,142 @@ enum SelfCheck {
 
         expect(ProductMatcher.normalize("LECHE ENT. 1L") == "leche ent l", "нормализация строки чека",
                ProductMatcher.normalize("LECHE ENT. 1L"))
+    }
+
+    /// Повторяющиеся операции: даты не должны съезжать в коротких месяцах,
+    /// а повторный прогон — плодить дубликаты.
+    private static func checkRecurring() {
+        print("\nРегулярные операции:")
+
+        var rent = RecurringRule()
+        rent.title = "Аренда"
+        rent.amount = 1250
+        rent.flow = .expense
+        rent.unit = .month
+        rent.dayOfMonth = 3
+        rent.startDate = day(2026, 1, 1)
+
+        let pending = RecurrenceEngine.pending(for: rent, now: day(2026, 9, 4))
+        expect(pending.count == 9, "с января по сентябрь — девять срабатываний", "\(pending.count)")
+
+        var endOfMonth = rent
+        endOfMonth.dayOfMonth = 31
+        let longDates = RecurrenceEngine.occurrences(of: endOfMonth, after: day(2025, 12, 31), through: day(2026, 4, 30))
+        let days = longDates.map { Cal.ru.component(.day, from: $0) }
+        expect(days == [31, 28, 31, 30], "31-е число становится последним днём короткого месяца", "\(days)")
+
+        var late = rent
+        late.startDate = day(2026, 1, 15)
+        let firstLate = RecurrenceEngine.firstOccurrence(of: late)
+        expect(firstLate.map { Cal.ru.component(.month, from: $0) } == 2,
+               "если день месяца уже прошёл, первое срабатывание — в следующем")
+
+        var quarterly = rent
+        quarterly.interval = 3
+        quarterly.dayOfMonth = 10
+        quarterly.startDate = day(2026, 2, 10)
+        let quarters = RecurrenceEngine.occurrences(of: quarterly, after: day(2026, 2, 9), through: day(2027, 2, 9))
+        expect(quarters.count == 4, "квартальное правило срабатывает четыре раза в год", "\(quarters.count)")
+
+        var ending = rent
+        ending.dayOfMonth = 5
+        ending.startDate = day(2026, 4, 1)
+        ending.endDate = day(2026, 6, 30)
+        let limited = RecurrenceEngine.occurrences(of: ending, after: day(2026, 3, 31), through: day(2026, 12, 31))
+        expect(limited.count == 3, "после даты окончания правило молчит", "\(limited.count)")
+
+        var weekly = RecurringRule()
+        weekly.amount = 10
+        weekly.unit = .week
+        weekly.weekday = 2
+        weekly.startDate = day(2026, 9, 2)
+        let mondays = RecurrenceEngine.occurrences(of: weekly, after: day(2026, 9, 1), through: day(2026, 9, 30))
+        expect(mondays.count == 4 && mondays.allSatisfy { Cal.ru.component(.weekday, from: $0) == 2 },
+               "недельное правило попадает на понедельники", "\(mondays.count)")
+
+        var disabled = rent
+        disabled.isActive = false
+        expect(RecurrenceEngine.pending(for: disabled, now: day(2026, 9, 4)).isEmpty,
+               "выключенный шаблон ничего не создаёт")
+
+        // Хранилище без записи на диск: самопроверка не должна трогать ваши данные.
+        var data = AppData.starter()
+        data.recurring = [rent]
+        let store = Store(data: data, persists: false)
+        let created = store.applyRecurringRules(now: day(2026, 9, 4))
+        expect(created == 9, "хранилище создало девять операций", "\(created)")
+        expect(store.data.transactions.allSatisfy { $0.recurringID == rent.id },
+               "операции помечены своим шаблоном")
+        let again = store.applyRecurringRules(now: day(2026, 9, 4))
+        expect(again == 0, "повторный прогон дублей не делает", "\(again)")
+    }
+
+    /// Выписка банка: колонки, форматы чисел и автокатегоризация.
+    private static func checkStatement() {
+        print("\nВыписка банка:")
+
+        let withHeader = """
+        "Fecha";"Concepto";"Importe";"Saldo"
+        "03/09/2026";"RECIBO ALQUILER PISO";"-1.250,00";"3.120,45"
+        "05/09/2026";"NOMINA SEPTIEMBRE";"4.594,00";"7.714,45"
+        "06/09/2026";"COMPRA EROSKI CENTER BILBAO";"-78,35";"7.636,10"
+        "07/09/2026";"GLOVO APP 3345";"-24,90";"7.611,20"
+        "08/09/2026";"NETFLIX.COM";"-13,99";"7.597,21"
+        TOTAL;;;
+        """
+        let parsed = StatementParser.parse(text: withHeader)
+        expect(parsed.rows.count == 5, "разобрано пять операций", "\(parsed.rows.count)")
+        expect(near(parsed.rows.first?.amount ?? 0, -1250), "испанский формат «-1.250,00» прочитан")
+        expect((parsed.rows.first(where: { $0.details.contains("NOMINA") })?.amount ?? 0) > 0,
+               "зарплата распознана как поступление")
+        expect(parsed.rows.allSatisfy { abs($0.amount) < 5000 },
+               "колонка «Importe» не перепутана с «Saldo»")
+
+        let withoutHeader = """
+        2026-09-03,RECIBO ALQUILER,-1250.00,3120.45
+        2026-09-05,NOMINA,4594.00,7714.45
+        2026-09-06,MERCADONA COMPRA,-52.10,7662.35
+        """
+        let inferred = StatementParser.parse(text: withoutHeader)
+        expect(inferred.rows.count == 3, "файл без заголовка тоже читается", "\(inferred.rows.count)")
+        expect(inferred.rows.first?.details.contains("ALQUILER") == true,
+               "описание не перепутано с датой", inferred.rows.first?.details ?? "—")
+        expect(inferred.rows.allSatisfy { abs($0.amount) < 5000 },
+               "сумма выбрана по знакам, а не по остатку")
+
+        expect(near(StatementParser.parseAmount("1.234,56") ?? 0, 1234.56), "формат «1.234,56»")
+        expect(near(StatementParser.parseAmount("1,234.56") ?? 0, 1234.56), "формат «1,234.56»")
+        expect(near(StatementParser.parseAmount("-45,20 €") ?? 0, -45.20), "сумма с валютой")
+        expect(StatementParser.parseAmount("2026-09-03") == nil, "дата не считается суммой")
+
+        expect(MerchantRules.categoryName(for: "COMPRA EROSKI CENTER BILBAO", amount: -78.35) == "Продукты",
+               "супермаркет распознан")
+        expect(MerchantRules.categoryName(for: "GLOVO APP 3345", amount: -24.9) == "Фаст-фуд",
+               "доставка распознана")
+        expect(MerchantRules.categoryName(for: "NOMINA SEPTIEMBRE", amount: 4594) == "Зарплата",
+               "зарплата распознана")
+        expect(MerchantRules.categoryName(for: "NOMINA SEPTIEMBRE", amount: -100) == nil,
+               "зарплата не бывает расходом")
+        expect(MerchantRules.categoryName(for: "PAGO TARJETA 4587", amount: -30) == nil,
+               "непонятная строка остаётся без категории")
+
+        // Дубликаты: та же дата и сумма уже есть в приложении.
+        var data = AppData.starter()
+        var existing = Txn()
+        existing.date = day(2026, 9, 6)
+        existing.amount = 78.35
+        existing.flow = .expense
+        data.transactions = [existing]
+        let store = Store(data: data, persists: false)
+
+        let prepared = store.prepare(parsed)
+        let duplicates = prepared.rows.filter { $0.isDuplicate }
+        expect(duplicates.count == 1, "повтор по дате и сумме помечен", "\(duplicates.count)")
+        expect(duplicates.first?.include == false, "дубликат по умолчанию не импортируется")
+
+        let imported = store.importStatement(rows: prepared.rows)
+        expect(imported == 4, "импортированы только новые операции", "\(imported)")
+        expect(store.data.merchantRules.isEmpty == false, "разбор запомнил соответствия магазинов")
     }
 
     /// Файлы первой версии не знали про режим у цели — проверяем, что они читаются
