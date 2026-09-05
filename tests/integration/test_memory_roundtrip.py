@@ -78,3 +78,35 @@ def test_artifacts_are_addressed_by_hash(runtime):
 
     assert first.id == second.id, "одинаковый результат не должен раздваиваться"
     assert runtime.artifacts.read(first.id) == "# отчёт"
+
+
+def test_skill_outcomes_close_the_self_improvement_loop(runtime):
+    """Навык должен узнавать, помог он или нет: иначе ранжирование инертно."""
+    runtime.sync_skills()
+    name = runtime.skills.catalog()[0].name
+    mission_id = runtime.sm.create_mission("миссия с применением навыка")
+
+    runtime.tools.call("skill_load", {"name": name}, mission_id=mission_id)
+    scored = Improver(runtime).mark_skill_outcomes(mission_id, success=True)
+
+    assert scored == [name]
+    skill = next(s for s in runtime.skills.catalog() if s.name == name)
+    assert skill.uses >= 1
+    assert skill.wins == 1
+    assert skill.score > 0.5
+
+    Improver(runtime).mark_skill_outcomes(mission_id, success=False)
+    skill = next(s for s in runtime.skills.catalog() if s.name == name)
+    assert skill.losses == 1
+    assert skill.score == 0.5, "неудачи должны опускать рейтинг, а не игнорироваться"
+
+
+def test_consolidation_scores_skills_of_the_run(runtime):
+    runtime.sync_skills()
+    name = runtime.skills.catalog()[0].name
+    mission_id = runtime.sm.create_mission("миссия для консолидации")
+    runtime.tools.call("skill_load", {"name": name}, mission_id=mission_id)
+
+    result = Improver(runtime).consolidate(mission_id, success=True)
+
+    assert name in result.scored_skills

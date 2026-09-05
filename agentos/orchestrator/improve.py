@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..bus import EV_MEMORY_WRITE, EV_SKILL_PROPOSED
+from ..bus import EV_MEMORY_WRITE, EV_SKILL_PROPOSED, EV_SKILL_USED
 from ..errors import ProviderUnavailable, QuotaExhausted
 from ..memory.semantic import KIND_FACT, KIND_LESSON
 from ..memory.working import GOAL_MARKER, SCHEMA_MARKER, truncate_to_tokens
@@ -51,6 +51,7 @@ class ConsolidationResult:
     lessons: list[str] = field(default_factory=list)
     proposed_skills: list[str] = field(default_factory=list)
     promoted_skills: list[str] = field(default_factory=list)
+    scored_skills: list[str] = field(default_factory=list)
 
 
 class Improver:
@@ -58,9 +59,10 @@ class Improver:
         self.rt = runtime
 
     # -------------------------------------------------------------- основное
-    def consolidate(self, mission_id: str) -> ConsolidationResult:
+    def consolidate(self, mission_id: str, *, success: bool = True) -> ConsolidationResult:
         """Сжать прогон в знание. Вызывается по завершении миссии."""
         result = ConsolidationResult()
+        result.scored_skills = self.mark_skill_outcomes(mission_id, success=success)
         payload = self._distill(mission_id)
 
         for item in payload.get("facts", []) or []:
@@ -292,10 +294,28 @@ class Improver:
             )
         return written
 
-    def _mark_skill_outcomes(self, mission_id: str, success: bool) -> None:
-        """Отметить применённые навыки — по этому растёт их рейтинг."""
+    def mark_skill_outcomes(self, mission_id: str, *, success: bool) -> list[str]:
+        """Отметить исход применения навыков этой миссии.
+
+        Без этого шага контур самоулучшения разомкнут: навыки предлагаются,
+        но никогда не узнают, помогли они или помешали, и ранжирование по
+        успешности остаётся инертным.
+
+        Учитываются навыки, чьё тело реально подтягивали: в direct-режиме это
+        вызовы инструмента skill_load, в native — `agentctl skill show`,
+        который пишет то же событие.
+        """
+        names: list[str] = []
+        for event in self.rt.bus.of_kind(EV_SKILL_USED, mission_id):
+            name = str(event["payload"].get("name", ""))
+            if name and name not in names:
+                names.append(name)
         for event in self.rt.bus.of_kind("tool.call", mission_id):
-            if event["payload"].get("tool") == "skill_load":
-                name = event["payload"].get("args", {}).get("name", "")
-                if name:
-                    self.rt.skills.record_outcome(name, success=success)
+            if event["payload"].get("tool") != "skill_load":
+                continue
+            name = str(event["payload"].get("args", {}).get("name", ""))
+            if name and name not in names:
+                names.append(name)
+        for name in names:
+            self.rt.skills.record_outcome(name, success=success)
+        return names

@@ -75,7 +75,10 @@ class SemanticMemory:
         self.store = store
         self.embedder = embedder
         self.config = config
-        self.index = BruteForceIndex(store)
+        backend = "auto"
+        if config is not None:
+            backend = str(config.get("memory.vector.backend", "auto"))
+        self.index = BruteForceIndex(store, backend)
 
     # ------------------------------------------------------------------ write
     def add(
@@ -182,12 +185,16 @@ class SemanticMemory:
             return []
         pool_size = max(limit * 4, 40)
         keyword_ids = self._keyword_ids(query, pool_size, kinds)
-        vector_ids = [
-            fid
-            for fid, _ in self.index.search(
-                self.embedder.embed_one(query), limit=pool_size, kinds=kinds
-            )
-        ]
+        vector_ids: list[str] = []
+        if self.index.enabled:
+            # Эмбеддинг считается только если он кому-то нужен: при
+            # backend=off это лишний вызов провайдера на каждый поиск.
+            vector_ids = [
+                fid
+                for fid, _ in self.index.search(
+                    self.embedder.embed_one(query), limit=pool_size, kinds=kinds
+                )
+            ]
 
         scores: dict[str, float] = {}
         for rank, fid in enumerate(keyword_ids):

@@ -33,7 +33,11 @@ memory:
     rrf_k: 60
     min_score: 0.0
   vector:
-    backend: auto           # auto | sqlite-vec | numpy | off
+    # auto   — numpy, если установлен, иначе чистый python
+    # numpy  — только numpy (без него падаем на старте, а не молча тормозим)
+    # python — принудительно чистый python
+    # off    — векторная половина поиска выключена, остаётся BM25
+    backend: auto
     embedder: hashing-local # id из config/models.yaml -> embeddings
   consolidate:
     on_run_finish: true

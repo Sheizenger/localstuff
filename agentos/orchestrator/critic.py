@@ -39,6 +39,9 @@ class GateResult:
     cmd: str
     passed: bool
     output: str = ""
+    #: Гейт не запускался (вложенный запуск). Пропуск — не доказательство:
+    #: такой критерий не считается ни пройденным, ни проваленным.
+    skipped: bool = False
 
 
 @dataclass
@@ -49,7 +52,7 @@ class VerificationResult:
 
     @property
     def accepted(self) -> bool:
-        return self.verdict.accepted and all(g.passed for g in self.gates)
+        return self.verdict.accepted and all(g.passed or g.skipped for g in self.gates)
 
 
 class Critic:
@@ -69,14 +72,13 @@ class Critic:
         for row in rows:
             if nested:
                 # Мы уже выполняемся внутри гейта: повторный запуск зациклится.
-                results.append(
-                    GateResult(
-                        row["criterion"],
-                        row["cmd"],
-                        True,
-                        "пропущен: выполняется внутри другого программного гейта",
+                note = "пропущен: выполняется внутри другого программного гейта"
+                results.append(GateResult(row["criterion"], row["cmd"], True, note, skipped=True))
+                with self.rt.store.tx() as conn:
+                    conn.execute(
+                        "UPDATE dod SET status=?, evidence=?, updated_at=? WHERE id=?",
+                        ("skipped", note, time.time(), row["id"]),
                     )
-                )
                 continue
             outcome = run_command(
                 row["cmd"],
@@ -105,10 +107,18 @@ class Critic:
         return results
 
     # ------------------------------------------------------------ проверка
-    def verify(self, mission_id: str) -> VerificationResult:
-        """Проверить миссию против DoD и, при отказе, завести исправления."""
+    def verify(
+        self, mission_id: str, *, host_verdict: Verdict | None = None
+    ) -> VerificationResult:
+        """Проверить миссию против DoD и, при отказе, завести исправления.
+
+        host_verdict — вердикт, вынесенный агент-хостом. Он нужен в
+        native-режиме: своей модели у системы там нет, а без вердикта миссия
+        никогда не закроется. Красный программный гейт отменяет любой
+        вердикт, чей бы он ни был: иначе гейт перестаёт быть гейтом.
+        """
         gates = self.run_gates(mission_id)
-        failed_gates = [g for g in gates if not g.passed]
+        failed_gates = [g for g in gates if not g.passed and not g.skipped]
 
         if failed_gates:
             verdict = Verdict(
@@ -116,6 +126,8 @@ class Critic:
                 reasons=[f"красный гейт: {g.cmd}" for g in failed_gates],
                 next_actions=[f"починить: {g.cmd}" for g in failed_gates],
             )
+        elif host_verdict is not None:
+            verdict = host_verdict
         else:
             verdict = self._ask_critic(mission_id, gates)
 
@@ -126,6 +138,7 @@ class Critic:
             verdict=verdict.verdict,
             summary=verdict.render()[:600],
             gates_failed=len(failed_gates),
+            source="host" if host_verdict is not None and not failed_gates else "critic",
         )
         self._record_semantic_criteria(mission_id, verdict)
 

@@ -39,6 +39,7 @@ EV_CRITIC_VERDICT = "critic.verdict"
 EV_GATE_RESULT = "gate.result"
 EV_MEMORY_WRITE = "memory.write"
 EV_SKILL_PROPOSED = "skill.proposed"
+EV_SKILL_USED = "skill.used"
 EV_RESUME = "run.resume"
 EV_CHECKPOINT = "run.checkpoint"
 

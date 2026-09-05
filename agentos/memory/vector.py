@@ -1,9 +1,12 @@
 """Векторный слой памяти.
 
-Три уровня деградации, интерфейс один:
-  1. sqlite-vec, если установлен — поиск на стороне SQLite;
-  2. numpy — честный полный перебор, быстрый до сотен тысяч записей;
-  3. чистый python — работает всегда, даже без numpy.
+Полный перебор, два исполнения с одним интерфейсом:
+  * numpy — быстрый до сотен тысяч записей;
+  * чистый python — работает всегда, даже без numpy.
+
+ANN-индекса здесь намеренно нет: его нужно перестраивать и держать
+согласованным с БД, а выигрыш появляется на объёмах, которых у памяти
+проекта не бывает (см. docs/adr/0002).
 
 Эмбеддинги берутся у провайдера (OpenAI/Google) либо считаются локально
 детерминированным хешированием. Локальный вариант не понимает смысла, но
@@ -100,31 +103,56 @@ class Embedder:
         return self.embed([text])[0]
 
 
+#: Допустимые значения memory.vector.backend в config/agentos.yaml.
+BACKENDS = ("auto", "numpy", "python", "off")
+
+
 class BruteForceIndex:
     """Полный перебор по векторам из таблицы facts.
 
-    numpy используется, если он есть; иначе тот же алгоритм на чистом python.
-    Индексных структур намеренно нет: до сотен тысяч фактов перебор быстрее
-    и на порядок проще в сопровождении, чем ANN-индекс, который надо
-    перестраивать и держать согласованным с БД.
+    backend управляет исполнением:
+      auto   — numpy, если он установлен, иначе чистый python;
+      numpy  — только numpy (без него — ошибка на старте, а не молча медленно);
+      python — принудительно чистый python;
+      off    — векторная половина поиска выключена, остаётся только BM25.
     """
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: Any, backend: str = "auto") -> None:
         self.store = store
+        if backend not in BACKENDS:
+            raise ValueError(
+                f"неизвестный backend векторов: {backend}. Допустимо: {', '.join(BACKENDS)}"
+            )
         try:
             import numpy  # noqa: F401
 
-            self._numpy = True
+            has_numpy = True
         except ImportError:
-            self._numpy = False
+            has_numpy = False
+
+        if backend == "numpy" and not has_numpy:
+            raise ValueError(
+                "memory.vector.backend=numpy, но numpy не установлен:"
+                " поставь 'agentos[vector]' или выбери auto"
+            )
+        self._requested = backend
+        self._numpy = has_numpy if backend == "auto" else backend == "numpy"
+
+    @property
+    def enabled(self) -> bool:
+        return self._requested != "off"
 
     @property
     def backend(self) -> str:
+        if not self.enabled:
+            return "off"
         return "numpy" if self._numpy else "python"
 
     def search(
         self, query_vec: list[float], *, limit: int = 20, kinds: tuple[str, ...] = ()
     ) -> list[tuple[str, float]]:
+        if not self.enabled:
+            return []
         sql = "SELECT id, embedding FROM facts WHERE embedding IS NOT NULL"
         params: list[Any] = []
         if kinds:

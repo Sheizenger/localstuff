@@ -23,6 +23,7 @@ from .memory.working import WorkingMemory
 from .policy.guard import PolicyGuard
 from .providers.registry import real_providers_configured
 from .providers.router import Router
+from .state.approvals import ApprovalQueue
 from .state.checkpoint import Checkpointer
 from .state.machine import StateMachine
 from .telemetry.ledger import Ledger
@@ -71,6 +72,10 @@ class Runtime:
     @cached_property
     def sm(self) -> StateMachine:
         return StateMachine(self.store)
+
+    @cached_property
+    def approvals(self) -> ApprovalQueue:
+        return ApprovalQueue(self.store)
 
     @cached_property
     def ledger(self) -> Ledger:
@@ -159,6 +164,10 @@ class Runtime:
             if skill is None:
                 return ToolResult(False, error=f"нет такого навыка: {name}")
             return ToolResult(True, output=skill.body)
+
+        # Событие пишет сам реестр инструментов (tool.call), поэтому
+        # дополнительная эмиссия здесь не нужна — mark_skill_outcomes
+        # читает оба источника.
 
         return [
             Tool(

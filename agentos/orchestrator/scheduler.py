@@ -47,6 +47,12 @@ class TickResult:
         return self.executed > 0
 
 
+def _approval_action(detail: str) -> str:
+    """Вытащить имя действия из текста блокировки для читаемого списка."""
+    head = detail.split(":", 1)[0].strip()
+    return head[:60] or "подтверждение"
+
+
 class Scheduler:
     def __init__(self, runtime: Runtime) -> None:
         self.rt = runtime
@@ -187,6 +193,16 @@ class Scheduler:
             STATUS_BLOCKED_CAPABILITY: TaskStatus.BLOCKED_CAPABILITY,
             STATUS_BLOCKED_APPROVAL: TaskStatus.BLOCKED_APPROVAL,
         }
+        if outcome.status == STATUS_BLOCKED_APPROVAL:
+            # Запрос живёт в очереди, а не только в статусе задачи: иначе
+            # список того, что нужно от человека, теряется между сессиями.
+            self.rt.approvals.request(
+                _approval_action(outcome.detail),
+                outcome.detail,
+                mission_id=task.mission_id,
+                task_id=task.id,
+            )
+
         if outcome.status in blocked_map:
             self.rt.sm.transition(
                 task.id,

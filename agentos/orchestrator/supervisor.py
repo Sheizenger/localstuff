@@ -63,7 +63,13 @@ class Supervisor:
         return mission_id, spec, self.advance(mission_id)
 
     # -------------------------------------------------------------- движение
-    def advance(self, mission_id: str, *, max_ticks: int = 50) -> AdvanceResult:
+    def advance(
+        self,
+        mission_id: str,
+        *,
+        max_ticks: int = 50,
+        host_verdict: Any = None,
+    ) -> AdvanceResult:
         """Продвинуть миссию настолько, насколько это возможно сейчас."""
         result = AdvanceResult(mission_id=mission_id)
         mission = self.rt.sm.get_mission(mission_id)
@@ -79,7 +85,7 @@ class Supervisor:
 
         # Задачи кончились — пора проверять результат.
         if self.rt.sm.is_mission_settled(mission_id) and not result.handoffs:
-            result = self._verify_stage(mission_id, result)
+            result = self._verify_stage(mission_id, result, host_verdict=host_verdict)
 
         self.rt.checkpointer.settle_missions()
         self.rt.checkpointer.write(mission_id)
@@ -90,7 +96,9 @@ class Supervisor:
         result.wait_seconds = self.scheduler.wait_seconds(mission_id)
         return result
 
-    def _verify_stage(self, mission_id: str, result: AdvanceResult) -> AdvanceResult:
+    def _verify_stage(
+        self, mission_id: str, result: AdvanceResult, *, host_verdict: Any = None
+    ) -> AdvanceResult:
         """Прогнать гейты и критика; при отказе — доработать и вернуться."""
         counts = self.rt.sm.status_counts(mission_id)
         if not counts.get(TaskStatus.DONE.value):
@@ -99,7 +107,7 @@ class Supervisor:
             return result  # сначала снять блокировки, потом судить о результате
 
         self.rt.sm.set_mission_status(mission_id, MissionStatus.VERIFYING)
-        verification = self.critic.verify(mission_id)
+        verification = self.critic.verify(mission_id, host_verdict=host_verdict)
         result.verdict = verification.verdict.verdict
 
         if verification.fix_tasks:
@@ -117,6 +125,15 @@ class Supervisor:
         if verification.accepted:
             self.rt.sm.set_mission_status(mission_id, MissionStatus.DONE)
             self._on_finish(mission_id)
+        elif verification.verdict.verdict == "reject" and not verification.fix_tasks:
+            # Исправления исчерпаны, результат так и не принят.
+            self._on_finish(mission_id, success=False)
+            self.rt.sm.set_mission_status(
+                mission_id,
+                MissionStatus.BLOCKED,
+                blocked_reason="; ".join(verification.verdict.reasons)[:400]
+                or "результат не принят, попытки исправления исчерпаны",
+            )
         elif verification.verdict.verdict == "needs_human":
             self.rt.sm.set_mission_status(
                 mission_id,
@@ -133,13 +150,19 @@ class Supervisor:
         )
         return result
 
-    def _on_finish(self, mission_id: str) -> None:
-        """Консолидация памяти после успешного завершения."""
+    def _on_finish(self, mission_id: str, *, success: bool = True) -> None:
+        """Консолидация памяти после завершения миссии.
+
+        Вызывается и при провале: неудачный прогон — тоже знание, а навыки
+        должны узнать, что они не помогли.
+        """
         if not self.rt.config.get("memory.consolidate.on_run_finish", True):
             return
         from .improve import Improver
 
-        Improver(self.rt).consolidate(mission_id)
+        improver = Improver(self.rt)
+        improver.consolidate(mission_id, success=success)
+        improver.retro(mission_id)
 
     # ------------------------------------------------------------- resume
     def resume(self, *, once: bool = False) -> tuple[int, list[AdvanceResult]]:

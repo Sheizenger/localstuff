@@ -82,3 +82,36 @@ def test_skill_catalog_exposes_headers_only(runtime):
 
     loaded = runtime.skills.load(catalog[0].name)
     assert len(loaded.body) > 100
+
+
+def test_vector_backend_is_a_real_switch(store):
+    """Конфиг обещал sqlite-vec, которого не было; теперь значения честные."""
+    from agentos.memory.vector import BACKENDS, BruteForceIndex
+
+    assert set(BACKENDS) == {"auto", "numpy", "python", "off"}
+
+    auto = BruteForceIndex(store, "auto")
+    assert auto.enabled
+    assert auto.backend in ("numpy", "python")
+
+    off = BruteForceIndex(store, "off")
+    assert not off.enabled
+    assert off.backend == "off"
+    assert off.search([0.1] * 512) == [], "выключенный бэкенд не должен искать"
+
+    with pytest.raises(ValueError, match="sqlite-vec"):
+        BruteForceIndex(store, "sqlite-vec")
+
+
+def test_search_still_works_with_vectors_off(store, config, monkeypatch):
+    """BM25 обязан продолжать работать: поиск не должен исчезать целиком."""
+    from agentos.memory.semantic import SemanticMemory
+    from agentos.memory.vector import Embedder
+
+    monkeypatch.setitem(config.main["memory"]["vector"], "backend", "off")
+    memory = SemanticMemory(store, Embedder(config), config)
+    memory.add("Линтер — ruff, конфиг в pyproject.toml", subject="сборка")
+
+    assert not memory.index.enabled
+    found = memory.search("ruff")
+    assert found and "ruff" in found[0].content

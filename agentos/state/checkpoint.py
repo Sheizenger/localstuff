@@ -165,6 +165,19 @@ class Checkpointer:
     def resume_pointer(self) -> dict[str, Any]:
         return read_json(self.resume_path, {"has_work": False, "missions": []})
 
+    def unmet_criteria(self, mission_id: str) -> list[str]:
+        """Критерии приёмки, которые ещё не подтверждены.
+
+        Таблица dod — источник правды о готовности. Раньше статус миссии
+        считался только по задачам, и миссия закрывалась как DONE, даже если
+        критерий никто не проверял: вердикт критика молча перезаписывался.
+        """
+        rows = self.store.query(
+            "SELECT criterion, status FROM dod WHERE mission_id=? ORDER BY ord",
+            (mission_id,),
+        )
+        return [r["criterion"] for r in rows if r["status"] not in ("pass", "skipped")]
+
     def settle_missions(self) -> list[str]:
         """Перевести миссии, где всё доделано, в терминальный статус.
 
@@ -178,12 +191,18 @@ class Checkpointer:
             counts = self.sm.status_counts(mid)
             needs_human = sum(counts.get(s.value, 0) for s in NEEDS_HUMAN)
             failed = counts.get(TaskStatus.FAILED.value, 0)
+            unmet = self.unmet_criteria(mid)
             if needs_human:
                 target = MissionStatus.BLOCKED
                 reason = f"ждёт человека: {needs_human} задач(и)"
             elif failed:
                 target = MissionStatus.FAILED
                 reason = f"провалено задач: {failed}"
+            elif unmet:
+                # Задачи кончились, но приёмка не пройдена. «Готово» — это
+                # подтверждённые критерии, а не отсутствие оставшейся работы.
+                target = MissionStatus.BLOCKED
+                reason = "не подтверждены критерии приёмки: " + "; ".join(unmet[:3])
             else:
                 target = MissionStatus.DONE
                 reason = ""

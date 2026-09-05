@@ -285,7 +285,7 @@ def _print_mission(rt: Any, mission_id: str) -> None:
         "SELECT criterion, status FROM dod WHERE mission_id=? ORDER BY ord", (mission_id,)
     )
     if dod:
-        marks = {"pass": "✓", "fail": "✗", "pending": "·"}
+        marks = {"pass": "✓", "fail": "✗", "pending": "·", "skipped": "⊘"}
         out("  критерии приёмки:")
         for row in dod:
             out(f"    {marks.get(row['status'], '·')} {row['criterion']}")
@@ -303,6 +303,9 @@ def _print_mission(rt: Any, mission_id: str) -> None:
 
     if mission["blocked_reason"]:
         out(f"  ⚠ {mission['blocked_reason']}")
+
+    for approval in rt.approvals.pending(mission_id):
+        out(f"  ✋ {approval.id} {approval.action}: {approval.detail[:80]}")
 
 
 def _print_handoffs(handoffs: list[dict[str, str]]) -> None:
@@ -501,7 +504,7 @@ def cmd_mission_dod(args: argparse.Namespace) -> int:
             "SELECT criterion, kind, cmd, status FROM dod WHERE mission_id=? ORDER BY ord",
             (args.mission_id,),
         )
-        marks = {"pass": "✓", "fail": "✗", "pending": "·"}
+        marks = {"pass": "✓", "fail": "✗", "pending": "·", "skipped": "⊘"}
         for row in rows:
             cmd = f"  ({row['cmd']})" if row["cmd"] else ""
             out(f"  {marks.get(row['status'], '·')} [{row['kind']}] {row['criterion']}{cmd}")
@@ -510,20 +513,97 @@ def cmd_mission_dod(args: argparse.Namespace) -> int:
         rt.close()
 
 
+def cmd_mission_budget(args: argparse.Namespace) -> int:
+    """Поднять бюджет миссии и снять её с паузы.
+
+    Без этой команды исчерпанный бюджет был тупиком: планировщик просил
+    подтвердить увеличение, а подтвердить было нечем.
+    """
+    import time as _time
+
+    from .state.machine import MissionStatus
+
+    rt = _runtime(args)
+    try:
+        mission = rt.sm.get_mission(args.mission_id)
+        if not mission:
+            out(f"миссия не найдена: {args.mission_id}")
+            return 2
+
+        spend = rt.ledger.mission_spend(args.mission_id)
+        tokens = int(mission["budget_tokens"])
+        usd = float(mission["budget_usd"])
+        if args.tokens:
+            tokens = tokens + args.tokens if args.add else args.tokens
+        if args.usd:
+            usd = usd + args.usd if args.add else args.usd
+
+        if tokens and tokens < spend.tokens:
+            out(f"новый бюджет {tokens} меньше уже потраченного {spend.tokens} токенов")
+            return 2
+
+        with rt.store.tx() as conn:
+            conn.execute(
+                "UPDATE missions SET budget_tokens=?, budget_usd=?, updated_at=? WHERE id=?",
+                (tokens, usd, _time.time(), args.mission_id),
+            )
+        out(
+            f"бюджет: {mission['budget_tokens']} -> {tokens} токенов,"
+            f" ${mission['budget_usd']:.2f} -> ${usd:.2f}"
+        )
+
+        # Миссия, вставшая именно из-за бюджета, продолжает работу сразу.
+        blocked_by_budget = (
+            mission["status"] == MissionStatus.BLOCKED.value
+            and "бюджет" in (mission["blocked_reason"] or "")
+        )
+        if blocked_by_budget:
+            rt.sm.set_mission_status(args.mission_id, MissionStatus.RUNNING)
+            out("миссия снята с паузы — продолжится при следующем resume")
+        rt.checkpointer.write(args.mission_id)
+        return 0
+    finally:
+        rt.close()
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
-    """Прогнать гейты и критика по требованию."""
+    """Приёмка миссии: гейты плюс вердикт по семантическим критериям.
+
+    Без --verdict вердикт выносит критик своей моделью. В native-режиме
+    модели у системы нет, и вердикт выносит агент-хост — иначе миссия не
+    закроется никогда. Красный программный гейт отменяет любой вердикт.
+    """
+    from .agents.report import Verdict
     from .orchestrator.critic import Critic
 
     rt = _runtime(args)
     try:
-        result = Critic(rt).verify(args.mission_id)
+        host_verdict = None
+        if args.verdict:
+            host_verdict = Verdict(
+                verdict=args.verdict,
+                reasons=list(args.reason or []),
+                next_actions=list(args.action or []),
+            )
+        result = Critic(rt).verify(args.mission_id, host_verdict=host_verdict)
         for gate in result.gates:
             out(f"  [{'✓' if gate.passed else '✗'}] {gate.cmd}")
         out("")
         out(result.verdict.render())
         if result.fix_tasks:
             out(f"заведено задач на исправление: {len(result.fix_tasks)}")
+
+        rt.checkpointer.settle_missions()
         rt.checkpointer.write(args.mission_id)
+        unmet = rt.checkpointer.unmet_criteria(args.mission_id)
+        if unmet:
+            out("")
+            out("не подтверждены критерии:")
+            for criterion in unmet:
+                out(f"  · {criterion}")
+        else:
+            out("")
+            out("все критерии приёмки подтверждены")
         return 0 if result.accepted else 1
     finally:
         rt.close()
@@ -613,7 +693,25 @@ def cmd_skill(args: argparse.Namespace) -> int:
             if skill is None:
                 out(f"нет такого навыка: {args.name}")
                 return 2
+            if args.mission:
+                # Отметить применение, чтобы навык потом узнал свой исход.
+                from .bus import EV_SKILL_USED
+
+                rt.bus.emit(
+                    EV_SKILL_USED, mission_id=args.mission, actor="host", name=args.name
+                )
             out(skill.body)
+            return 0
+        if args.skill_action == "used":
+            rt.skills.record_outcome(args.name, success=not args.failure)
+            skill = next((s for s in rt.skills.catalog() if s.name == args.name), None)
+            if skill is None:
+                out(f"нет такого навыка: {args.name}")
+                return 2
+            out(
+                f"{args.name}: применений {skill.uses}, удачных {skill.wins},"
+                f" неудачных {skill.losses}, рейтинг {skill.score:.2f}"
+            )
             return 0
         if args.skill_action == "promote":
             ok = Improver(rt).promote_skill(args.name)
@@ -668,6 +766,53 @@ def cmd_capability(args: argparse.Namespace) -> int:
             auto = "auto" if spec.auto else "нужно подтверждение"
             missing = f", не хватает: {', '.join(spec.missing_env())}" if spec.missing_env() else ""
             out(f"  {name:12s} [{auto}{missing}] {spec.description}")
+        return 0
+    finally:
+        rt.close()
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    """Очередь того, что требует решения человека."""
+    from .state.machine import TaskStatus
+
+    rt = _runtime(args)
+    try:
+        if args.approve_action == "list":
+            pending = rt.approvals.pending(args.mission or "")
+            if not pending:
+                out("подтверждений не требуется")
+                return 0
+            out("Требуют решения:")
+            for approval in pending:
+                out(f"  {approval.as_line()}")
+            out("")
+            out("Решить: agentctl approve grant <id>  |  agentctl approve deny <id>")
+            return 0
+
+        approval = rt.approvals.get(args.approval_id)
+        if approval is None:
+            out(f"нет такого запроса: {args.approval_id}")
+            return 2
+
+        granted = args.approve_action == "grant"
+        rt.approvals.decide(args.approval_id, granted=granted)
+
+        # Решение человека должно двигать задачу, а не только менять строку в БД.
+        if approval.task_id:
+            task = rt.sm.get_task(approval.task_id)
+            if task is not None and task.status is TaskStatus.BLOCKED_APPROVAL:
+                if granted:
+                    rt.sm.transition(task.id, TaskStatus.READY, blocked_reason="")
+                else:
+                    rt.sm.transition(
+                        task.id, TaskStatus.FAILED, blocked_reason="человек отказал"
+                    )
+            if task is not None:
+                rt.checkpointer.write(task.mission_id)
+
+        out(f"{approval.action}: {'разрешено' if granted else 'отказано'}")
+        if granted and approval.task_id:
+            out("задача вернулась в очередь — продолжится при следующем resume")
         return 0
     finally:
         rt.close()
@@ -784,14 +929,31 @@ def build_parser() -> argparse.ArgumentParser:
     mshow.add_argument("mission_id")
     mshow.add_argument("--events", action="store_true", help="добавить ход работы")
     mshow.set_defaults(func=cmd_mission_show)
+    mbudget = mission_sub.add_parser("budget", help="поднять бюджет и снять миссию с паузы")
+    mbudget.add_argument("mission_id")
+    mbudget.add_argument("--tokens", type=int, default=0, help="новый бюджет токенов")
+    mbudget.add_argument("--usd", type=float, default=0.0, help="новый бюджет в долларах")
+    mbudget.add_argument(
+        "--add", action="store_true", help="прибавить к текущему, а не заменить"
+    )
+    mbudget.set_defaults(func=cmd_mission_budget)
+
     mdod = mission_sub.add_parser("dod", help="посмотреть или дополнить критерии приёмки")
     mdod.add_argument("mission_id")
     mdod.add_argument("--add", default="", help="текст нового критерия")
     mdod.add_argument("--cmd", default="", help="команда — делает критерий программным гейтом")
     mdod.set_defaults(func=cmd_mission_dod)
 
-    verify = sub.add_parser("verify", help="прогнать гейты и критика по требованию")
+    verify = sub.add_parser("verify", help="приёмка миссии: гейты и вердикт по критериям")
     verify.add_argument("mission_id")
+    verify.add_argument(
+        "--verdict",
+        choices=["accept", "reject", "needs_human"],
+        default="",
+        help="вердикт агент-хоста; без него вердикт выносит критик своей моделью",
+    )
+    verify.add_argument("--reason", action="append", help="обоснование, можно несколько раз")
+    verify.add_argument("--action", action="append", help="что нужно доделать")
     verify.set_defaults(func=cmd_verify)
 
     agents = sub.add_parser("agents", help="описания субагентов для агент-хоста")
@@ -809,7 +971,16 @@ def build_parser() -> argparse.ArgumentParser:
     skill_sub.add_parser("list").set_defaults(func=cmd_skill)
     sshow = skill_sub.add_parser("show")
     sshow.add_argument("name")
+    sshow.add_argument(
+        "--mission", default="", help="отметить применение навыка в этой миссии"
+    )
     sshow.set_defaults(func=cmd_skill)
+    sused = skill_sub.add_parser("used", help="сообщить исход применения навыка")
+    sused.add_argument("name")
+    sused.add_argument(
+        "--failure", action="store_true", help="навык не помог (по умолчанию — помог)"
+    )
+    sused.set_defaults(func=cmd_skill)
     spromote = skill_sub.add_parser("promote", help="активировать черновик навыка")
     spromote.add_argument("name")
     spromote.set_defaults(func=cmd_skill)
@@ -837,6 +1008,18 @@ def build_parser() -> argparse.ArgumentParser:
     crequest.add_argument("name")
     crequest.add_argument("--reason", default="")
     crequest.set_defaults(func=cmd_capability)
+
+    approve = sub.add_parser("approve", help="решения по тому, что требует человека")
+    approve_sub = approve.add_subparsers(dest="approve_action", required=True)
+    alist = approve_sub.add_parser("list")
+    alist.add_argument("--mission", default="")
+    alist.set_defaults(func=cmd_approve)
+    agrant = approve_sub.add_parser("grant", help="разрешить и вернуть задачу в очередь")
+    agrant.add_argument("approval_id")
+    agrant.set_defaults(func=cmd_approve)
+    adeny = approve_sub.add_parser("deny", help="отказать")
+    adeny.add_argument("approval_id")
+    adeny.set_defaults(func=cmd_approve)
 
     events = sub.add_parser("events", help="журнал событий")
     events.add_argument("--mission", default="")
