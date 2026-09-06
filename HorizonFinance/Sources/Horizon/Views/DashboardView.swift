@@ -18,10 +18,97 @@ struct DashboardView: View {
                 zoneCard
                 paceCard
             }
+            planFactCard
             upcomingCard
             horizonCard
             monthsCard
         }
+    }
+
+    // MARK: Свод плана и факта
+
+    @ViewBuilder
+    private var planFactCard: some View {
+        let summary = analytics.planFact
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                SectionTitle(
+                    title: "Месяц против плана",
+                    subtitle: summary.isComplete
+                        ? "месяц закончился — это итог"
+                        : "прошло \(Fmt.percent(summary.dayProgress)) месяца · прогноз с учётом ожидаемого"
+                )
+                if summary.hasPlan {
+                    ZoneBadge(zone: summary.isReliable ? summary.zone : .warning,
+                              text: verdictBadge(summary))
+                }
+            }
+
+            if !summary.hasPlan {
+                Text("План месяца не задан, сравнивать не с чем. Укажите в «Настройках» ожидаемый доход, обязательные расходы и план накоплений — тогда здесь появится сводка «план против прогноза».")
+                    .font(.callout)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Открыть настройки") { bus.section = .settings }
+                    .buttonStyle(.link)
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+                    GridRow {
+                        Text("").gridColumnAlignment(.leading)
+                        Text("План").gridColumnAlignment(.trailing)
+                        Text("Прогноз").gridColumnAlignment(.trailing)
+                        Text("Разница").gridColumnAlignment(.trailing)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.muted)
+
+                    Divider().gridCellUnsizedAxes(.horizontal)
+
+                    planRow("Доход", plan: summary.incomePlan, forecast: summary.incomeForecast, delta: summary.incomeDelta)
+                    planRow("Обязательные", plan: summary.essentialsPlan, forecast: summary.essentialsForecast, delta: summary.essentialsDelta)
+                    planRow("Свободные", plan: summary.flexibleLimit, forecast: summary.flexibleForecast, delta: summary.flexibleDelta)
+
+                    Divider().gridCellUnsizedAxes(.horizontal)
+
+                    planRow("Накопления", plan: summary.savingsPlan, forecast: summary.savingsForecast, delta: summary.savingsDelta, bold: true)
+                }
+
+                Text(summary.verdict(currency: currency))
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
+            }
+        }
+        .cardStyle(tint: cardTint(summary))
+    }
+
+    private func planRow(_ title: String, plan: Double, forecast: Double, delta: Double, bold: Bool = false) -> some View {
+        GridRow {
+            Text(title)
+                .font(bold ? .subheadline.weight(.semibold) : .subheadline)
+            Text(Fmt.money(plan, code: currency))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(Palette.muted)
+            Text(Fmt.money(forecast, code: currency))
+                .font(bold ? .subheadline.monospacedDigit().weight(.semibold) : .subheadline.monospacedDigit())
+            Text(Fmt.signedMoney(delta, code: currency))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(delta >= -0.5 ? Palette.green : Palette.amber)
+        }
+    }
+
+    private func verdictBadge(_ summary: MonthPlanFact) -> String {
+        // Пока обязательные не покрыты, «лучше плана» было бы обманом на неполных данных.
+        guard summary.isReliable else { return "рано судить" }
+        if summary.savingsDelta >= 1 { return "лучше плана" }
+        if summary.savingsDelta <= -1 { return "хуже плана" }
+        return "по плану"
+    }
+
+    private func cardTint(_ summary: MonthPlanFact) -> Color? {
+        guard summary.hasPlan else { return nil }
+        if !summary.isReliable { return Palette.amber }
+        return summary.zone == .safe ? nil : summary.zone.color
     }
 
     // MARK: Ожидаемое по шаблонам
@@ -242,8 +329,36 @@ struct DashboardView: View {
                     .font(.caption)
                     .foregroundStyle(Palette.amber)
             }
+
+            // Зона лимита намеренно строгая, но человек должен видеть и общую картину месяца.
+            offsetNote(status: status)
         }
         .cardStyle(tint: status.zone == .safe ? nil : status.zone.color)
+    }
+
+    /// Взаимозачёт: перерасход свободных может быть перекрыт экономией на обязательных.
+    @ViewBuilder
+    private func offsetNote(status: BudgetStatus) -> some View {
+        let summary = analytics.planFact
+        if summary.hasPlan && status.zone != .safe && summary.isReliable {
+            if summary.savingsDelta >= 1 {
+                Label(
+                    "Месяц в целом не хуже плана: накопления выйдут на \(Fmt.money(summary.savingsDelta, code: currency)) больше — обязательные расходы вышли дешевле. Лимит это не отменяет.",
+                    systemImage: "arrow.left.arrow.right.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(Palette.green)
+                .fixedSize(horizontal: false, vertical: true)
+            } else if summary.savingsDelta <= -1 {
+                Label(
+                    "И перекрыть нечем: накопления за месяц выйдут на \(Fmt.money(-summary.savingsDelta, code: currency)) меньше плана.",
+                    systemImage: "arrow.down.right.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(Palette.red)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: Темп

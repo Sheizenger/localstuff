@@ -56,6 +56,7 @@ enum SelfCheck {
         checkBasket()
         checkReceipts()
         checkRecurring()
+        checkPlanFact()
         checkStatement()
         checkMigration()
         checkFormatting()
@@ -532,6 +533,89 @@ enum SelfCheck {
                "операции помечены своим шаблоном")
         let again = store.applyRecurringRules(now: day(2026, 9, 4))
         expect(again == 0, "повторный прогон дублей не делает", "\(again)")
+    }
+
+    /// Свод месяца: перерасход свободных против экономии на обязательных.
+    private static func checkPlanFact() {
+        print("\nСвод месяца, план против факта:")
+
+        func makeData(essentials: Double, flexible: Double, income: Double) -> AppData {
+            var data = AppData.starter()
+            data.profile.plannedIncome = 4600
+            data.profile.essentialsPlan = 2200
+            data.profile.flexibleLimit = 500
+            data.profile.savingsPlan = 1900
+
+            let salary = data.categories.first(where: { $0.flow == .income })!
+            let rent = data.categories.first(where: { $0.flow == .expense && $0.kind == .essential })!
+            let cafe = data.categories.first(where: { $0.flow == .expense && $0.kind == .flexible })!
+
+            data.transactions = [
+                Txn(date: day(2026, 9, 5), amount: income, flow: .income, categoryID: salary.id),
+                Txn(date: day(2026, 9, 3), amount: essentials, flow: .expense, categoryID: rent.id),
+                Txn(date: day(2026, 9, 10), amount: flexible, flow: .expense, categoryID: cafe.id)
+            ]
+            return data
+        }
+
+        // Главный сценарий: свободные вышли за лимит на 80, обязательные сэкономили 150.
+        let offset = Analytics(data: makeData(essentials: 2050, flexible: 580, income: 4600),
+                               today: day(2026, 9, 30))
+        let summary = offset.planFact
+
+        expect(summary.isComplete, "30 сентября месяц считается завершённым")
+        expect(near(summary.essentialsDelta, 150), "экономия на обязательных — 150", "\(summary.essentialsDelta)")
+        expect(near(summary.flexibleDelta, -80), "перерасход свободных — 80", "\(summary.flexibleDelta)")
+        expect(near(summary.savingsDelta, 70), "итог месяца: +70 к плану накоплений", "\(summary.savingsDelta)")
+        expect(near(summary.savingsDelta, summary.essentialsDelta + summary.flexibleDelta),
+               "итог равен сумме отклонений")
+        expect(summary.zone == .safe, "месяц в целом в зелёной зоне")
+        expect(offset.budgetStatus.zone == .danger,
+               "при этом лимит свободных всё равно красный — он не смягчается экономией")
+
+        let text = summary.verdict(currency: "EUR")
+        expect(text.contains("Перерасход") && text.contains("дешевле"), "вердикт объясняет взаимозачёт", text)
+        expect(text.contains("привычка"), "вердикт не разрешает считать лимит исчерпанным законно")
+
+        // Перекрыть нечем: и свободные, и обязательные выше плана.
+        let worse = Analytics(data: makeData(essentials: 2300, flexible: 700, income: 4600),
+                              today: day(2026, 9, 30)).planFact
+        expect(worse.savingsDelta < 0, "перерасход по обеим статьям тянет месяц вниз")
+        expect(worse.zone == .warning, "жёлтая зона месяца: накопления есть, но меньше плана")
+
+        // Доход не пришёл вовсе — это уже красная зона месяца.
+        let noIncome = Analytics(data: makeData(essentials: 2300, flexible: 700, income: 0),
+                                 today: day(2026, 9, 30)).planFact
+        expect(noIncome.savingsForecast < 0 && noIncome.zone == .danger,
+               "месяц без дохода — красная зона")
+
+        // Середина месяца: обязательные ещё не списаны, экономию объявлять рано.
+        let early = Analytics(data: makeData(essentials: 0, flexible: 120, income: 4600),
+                              today: day(2026, 9, 5)).planFact
+        expect(early.essentialsUnderCovered, "неполные обязательные помечены как непокрытые")
+        expect(early.verdict(currency: "EUR").contains("ещё не закончился"),
+               "вердикт предупреждает, что судить рано")
+
+        // Регулярный шаблон превращает «ещё не списано» в известное ожидание.
+        var withRule = makeData(essentials: 0, flexible: 120, income: 4600)
+        let rentCategory = withRule.categories.first(where: { $0.flow == .expense && $0.kind == .essential })!
+        var rule = RecurringRule()
+        rule.title = "Аренда"
+        rule.amount = 2100
+        rule.flow = .expense
+        rule.categoryID = rentCategory.id
+        rule.unit = .month
+        rule.dayOfMonth = 25
+        rule.startDate = day(2026, 1, 1)
+        withRule.recurring = [rule]
+
+        let planned = Analytics(data: withRule, today: day(2026, 9, 5))
+        expect(near(planned.expectedRemainder.essential, 2100),
+               "ожидаемая аренда попала в обязательные", "\(planned.expectedRemainder.essential)")
+        expect(near(planned.planFact.essentialsForecast, 2100),
+               "прогноз обязательных учитывает ещё не списанное")
+        expect(!planned.planFact.essentialsUnderCovered,
+               "с шаблоном обязательные считаются покрытыми")
     }
 
     /// Выписка банка: колонки, форматы чисел и автокатегоризация.
