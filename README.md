@@ -97,6 +97,6 @@ AgentOS отвечает за план, память, бюджеты, чекпо
 
 ```bash
 make bootstrap && make doctor
-make test        # ? тестов, без ключей и без сети
+make test        # 154 теста, без ключей и без сети
 make eval        # эталонные миссии
 ```
