@@ -1,27 +1,102 @@
-👋 Hi, I’m @SilantevYan</br>
-I’m interested in Neural Networks, deep and machine learning, NLP and CV networks</br>
-I’m constantly learning Python and improving my skills in ML/DL fileds</br>
-Looking to collaborate on any Deep Learning projects</br>
-📫 You reach me via email - sheizenger@gmail.com or via [LinkedIn](https://www.linkedin.com/in/iansilantev/)</br>
-</br><a href= 'https://drive.google.com/file/d/1D5sBPmJgdqs5OD3q_WZSP7h4bj_IXJNH/view?usp=sharing'>MY RESUME</a>
+# AgentOS
 
-Projects that I've done already:
-<table width=100% valign=top align=center border=none>
-<tr>
- <td align=center>
-  Data Science Projects</p>
- </td>
- <td align=center>
-  Deep Learning Projects</p>
-  </td>
+Операционная система для автономных агентов: ставится один раз, подключается
+к любому проекту и заставляет всех агентов, которых вы там заводите, работать
+по одному контракту — чей бы CLI ни был запущен.
 
- </tr>
-<tr>
- <td>
- <a href="https://github.com/SilantevYan/Yandex_practicum-data-science-projects"><img width="320" height="200" src="https://d1m75rqqgidzqn.cloudfront.net/wp-data/2019/09/11134058/What-is-data-science-2.jpg" alt=""></a>
-</td>
-<td>
- <a href="https://github.com/SilantevYan/Deep_Learning"><img width="320" height="200" src="https://www.mesonstechnologies.com/images/deep-learning.jpg" alt=""></a>
-</td>
-</tr>
-</br>
+Она не зависит от провайдера модели, держит состояние работы на диске и
+продолжает начатое сама: после обрыва сессии и после исчерпания лимитов
+токенов. Человек ставит задачу как угодно абстрактно и не следит за процессом.
+
+## Установка
+
+```bash
+uv tool install agentos          # или: uv tool install .
+```
+
+Дальше в любом проекте:
+
+```bash
+cd ~/work/любой-проект
+agentctl install                 # точки входа + MCP-сервер
+agentctl doctor                  # проверить окружение
+agentctl goal "то, что нужно сделать"
+```
+
+`agentctl install` идемпотентен и не трогает чужое: markdown правится между
+маркерами, JSON сливается по ключам, невалидный чужой файл не переписывается.
+Повторный запуск обновляет точки входа после апгрейда.
+
+## Что появляется в проекте
+
+```
+AGENTS.md                 контракт для агента — читают Codex, Cursor и прочие
+CLAUDE.md / GEMINI.md     то же для своих хостов
+.cursor/rules/agentos.mdc правило для Cursor
+.mcp.json                 регистрация MCP-сервера AgentOS
+.claude/settings.json     хук: подхват работы на старте сессии
+.agentos/config/          настройки этого проекта (коммитится)
+.agentos/var/             состояние: база, журнал, чекпоинты (в .gitignore)
+```
+
+Для Codex команда выведет строку для `~/.codex/config.toml` — его настройки
+глобальные, и лезть туда за человека система не станет.
+
+## Как агент оказывается связан
+
+Два механизма, второй важнее.
+
+**Файлы-инструкции.** `AGENTS.md` и его собратья описывают контракт словами.
+Их можно прочитать по диагонали.
+
+**MCP-сервер.** Любой хост, говорящий по MCP, получает инструменты
+`agentos_resume`, `agentos_goal`, `agentos_task_report`, `agentos_verify`,
+`agentos_memory_search` и остальные, а сам контракт приезжает ему в
+рукопожатии. Инструмент виден в списке доступного, у него есть описание и
+схема аргументов — проигнорировать его труднее, чем файл.
+
+## Что система делает сама
+
+| | |
+|---|---|
+| Раскладывает абстрактную цель | в граф задач с ролями, тирами моделей и бюджетами |
+| Переживает обрыв сессии | чекпоинты и `agentctl resume` вместо пересказа в чате |
+| Переживает лимиты токенов | задача ждёт до точного времени сброса, остальные ветки идут |
+| Проверяет результат | программные гейты плюс критик, по возможности на другой модели |
+| Копит знание | факты проекта — в проекте, уроки — в `~/.agentos` и едут с вами |
+| Подключает возможности | MCP-серверы, навыки и доступы — по запросу агента |
+
+## Память двух уровней
+
+«Тесты здесь запускаются через `make test`» верно для одного репозитория и
+остаётся в нём. «Красный гейт нельзя переспорить вердиктом модели» верно
+везде и переезжает с вами в следующий проект. Читаются оба уровня, пишется
+один — по виду записи.
+
+Опционально подключается [Hindsight](https://github.com/vectorize-io/hindsight):
+он добавляет синтез — сводит накопленное в наблюдения и ментальные модели.
+Локальная память при этом остаётся источником правды, и при недоступности
+сервера всё продолжает работать.
+
+## Без единого ключа
+
+Система работает в native-режиме: субагентов запускает ваш агент-хост, а
+AgentOS отвечает за план, память, бюджеты, чекпоинты и приёмку. API-ключи
+нужны только для неприсмотренных прогонов (`direct`), где AgentOS сама
+обращается к моделям.
+
+## Документация
+
+- [Архитектура](docs/ARCHITECTURE.md) — как устроено и почему так
+- [Сценарии](docs/SCENARIOS.md) — восемь ситуаций, ради которых всё построено
+- [Реализация](docs/IMPLEMENTATION.md) — карта модулей и как расширять
+- [Верификация](docs/VERIFICATION.md) — чем подтверждается, что это работает
+- [Решения](docs/adr/) — четыре ADR по неочевидным выборам
+
+## Разработка
+
+```bash
+make bootstrap && make doctor
+make test        # ? тестов, без ключей и без сети
+make eval        # эталонные миссии
+```
