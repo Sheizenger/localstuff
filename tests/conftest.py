@@ -24,6 +24,8 @@ def isolated_env(tmp_path, monkeypatch):
     shutil.copytree(REPO_ROOT / "skills", skills_copy)
     monkeypatch.setenv("AGENTOS_SKILLS_DIR", str(skills_copy))
     monkeypatch.setenv("AGENTOS_HOME", str(tmp_path / "var"))
+    # Общая память по умолчанию живёт в ~/.agentos — тесты не должны туда писать.
+    monkeypatch.setenv("AGENTOS_GLOBAL_HOME", str(tmp_path / "global"))
     monkeypatch.setenv("AGENTOS_ALLOW_MOCK", "1")
     monkeypatch.setenv("AGENTOS_MODE", "direct")
     monkeypatch.setenv("AGENTOS_MOCK_STATE", str(tmp_path / "mock_calls.txt"))

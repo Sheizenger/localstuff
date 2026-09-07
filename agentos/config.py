@@ -1,7 +1,15 @@
 """Загрузка конфигурации AgentOS.
 
-Один объект `Config` собирает agentos.yaml, models.yaml, policy.yaml, mcp.json
-и роли из config/agents/. Код никогда не пишет в config/ — только читает.
+Конфигурация собирается слоями, от общего к частному:
+
+  1. agentos/defaults/       настройки, которые едут вместе с пакетом;
+  2. <репозиторий>/config/   собственный конфиг самого AgentOS, если он есть;
+  3. ~/.agentos/config/      общие настройки человека — на все проекты;
+  4. <проект>/.agentos/config/  настройки конкретного проекта.
+
+Более поздний слой переопределяет более ранний, поэтому подключённому
+проекту достаточно описать отличия, а не копировать конфиг целиком.
+Код никогда не пишет в слои конфигурации — только читает.
 """
 
 from __future__ import annotations
@@ -15,21 +23,13 @@ from typing import Any
 import yaml
 
 from .errors import ConfigError
-
-DEFAULT_CONFIG_DIR = "config"
-
-
-def _repo_root() -> Path:
-    """Корень проекта: там, где лежит config/ рядом с пакетом agentos/."""
-    env = os.environ.get("AGENTOS_ROOT")
-    if env:
-        return Path(env).resolve()
-    return Path(__file__).resolve().parent.parent
+from .paths import config_layers, find_project_root, global_home, project_home, project_state
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
+    """Прочитать YAML. Отсутствие файла в слое — норма, а не ошибка."""
     if not path.exists():
-        raise ConfigError(f"нет файла конфигурации: {path}")
+        return {}
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
@@ -37,6 +37,30 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(f"{path}: ожидался объект на верхнем уровне")
     return data
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Слить словари рекурсивно: списки заменяются, вложенные словари сливаются.
+
+    Списки именно заменяются, а не склеиваются: если проект переопределяет
+    allow_binaries или каталог моделей, он задаёт их целиком — иначе убрать
+    что-то из унаследованного списка было бы нечем.
+    """
+    result = dict(base)
+    for key, value in override.items():
+        current = result.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            result[key] = deep_merge(current, value)
+        else:
+            result[key] = value
+    return result
+
+
+def _merge_layers(layers: list[Path], filename: str) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for layer in layers:
+        merged = deep_merge(merged, _load_yaml(layer / filename))
+    return merged
 
 
 @dataclass(frozen=True)
@@ -100,6 +124,8 @@ class Config:
     """Собранная конфигурация. Создаётся через Config.load()."""
 
     root: Path
+    #: Слои конфигурации, от общего к частному. Показываются в doctor.
+    layers: tuple[Path, ...]
     main: dict[str, Any]
     models: tuple[ModelSpec, ...]
     embedders: tuple[EmbedderSpec, ...]
@@ -111,18 +137,31 @@ class Config:
     # ------------------------------------------------------------------ load
     @classmethod
     def load(cls, root: Path | str | None = None) -> Config:
-        root_path = Path(root).resolve() if root else _repo_root()
-        cfg_dir = root_path / os.environ.get("AGENTOS_CONFIG_DIR", DEFAULT_CONFIG_DIR)
+        root_path = Path(root).resolve() if root else find_project_root()
+        override = os.environ.get("AGENTOS_CONFIG_DIR")
+        layers = (
+            [root_path / override] if override else config_layers(root_path)
+        )
+        layers = [layer for layer in layers if layer.is_dir()]
+        if not layers:
+            raise ConfigError(
+                "не найдено ни одного слоя конфигурации;"
+                " проверь установку пакета или AGENTOS_CONFIG_DIR"
+            )
 
-        main = _load_yaml(cfg_dir / "agentos.yaml")
-        models_doc = _load_yaml(cfg_dir / "models.yaml")
-        policy = _load_yaml(cfg_dir / "policy.yaml")
+        main = _merge_layers(layers, "agentos.yaml")
+        models_doc = _merge_layers(layers, "models.yaml")
+        policy = _merge_layers(layers, "policy.yaml")
 
-        mcp_path = cfg_dir / "mcp.json"
-        try:
-            mcp = json.loads(mcp_path.read_text(encoding="utf-8")) if mcp_path.exists() else {}
-        except json.JSONDecodeError as exc:
-            raise ConfigError(f"невалидный JSON в {mcp_path}: {exc}") from exc
+        mcp: dict[str, Any] = {}
+        for layer in layers:
+            mcp_path = layer / "mcp.json"
+            if not mcp_path.exists():
+                continue
+            try:
+                mcp = deep_merge(mcp, json.loads(mcp_path.read_text(encoding="utf-8")))
+            except json.JSONDecodeError as exc:
+                raise ConfigError(f"невалидный JSON в {mcp_path}: {exc}") from exc
 
         models = tuple(
             ModelSpec(
@@ -150,9 +189,17 @@ class Config:
         )
         order = tuple(models_doc.get("defaults", {}).get("provider_order", ["mock"]))
 
+        # Роли собираются по имени файла: одноимённая роль в более частном
+        # слое заменяет общую, поэтому проект может переопределить одну роль,
+        # не копируя остальные.
+        role_docs: dict[str, dict[str, Any]] = {}
+        for layer in layers:
+            for path in sorted((layer / "agents").glob("*.yaml")):
+                role_docs[path.stem] = deep_merge(role_docs.get(path.stem, {}), _load_yaml(path))
+
         roles: dict[str, RoleSpec] = {}
-        for path in sorted((cfg_dir / "agents").glob("*.yaml")):
-            doc = _load_yaml(path)
+        for stem, doc in sorted(role_docs.items()):
+            path = Path(f"{stem}.yaml")
             mem = doc.get("memory") or {}
             role = RoleSpec(
                 name=doc["name"],
@@ -170,15 +217,16 @@ class Config:
                 cross_provider=bool(doc.get("cross_provider", False)),
                 output_schema=str(doc.get("output_schema", "")),
             )
-            if role.name in roles:
-                raise ConfigError(f"дублирующаяся роль: {role.name} ({path})")
             roles[role.name] = role
 
         if not roles:
-            raise ConfigError(f"не найдено ни одной роли в {cfg_dir / 'agents'}")
+            raise ConfigError(
+                "не найдено ни одной роли: проверь agents/ в слоях конфигурации"
+            )
 
         return cls(
             root=root_path,
+            layers=tuple(layers),
             main=main,
             models=models,
             embedders=embedders,
@@ -200,11 +248,27 @@ class Config:
 
     @property
     def home(self) -> Path:
-        """Каталог рантайм-состояния (var/). Создаётся при init."""
-        env = os.environ.get("AGENTOS_HOME")
-        raw = env or str(self.get("home", "./var"))
-        path = Path(raw)
-        return path.resolve() if path.is_absolute() else (self.root / path).resolve()
+        """Рантайм-состояние проекта: <проект>/.agentos/var."""
+        return project_state(self.root)
+
+    @property
+    def project_dir(self) -> Path:
+        """Каталог AgentOS в проекте: <проект>/.agentos."""
+        return project_home(self.root)
+
+    @property
+    def global_dir(self) -> Path:
+        """Общий каталог человека: ~/.agentos — знание на все проекты."""
+        return global_home()
+
+    @property
+    def global_db_path(self) -> Path:
+        """База общего знания: уроки и предпочтения, переезжающие с человеком."""
+        return self.global_dir / "var" / "global.db"
+
+    @property
+    def global_skills_dir(self) -> Path:
+        return self.global_dir / "skills"
 
     @property
     def db_path(self) -> Path:
@@ -251,5 +315,12 @@ class Config:
 
     def ensure_dirs(self) -> None:
         """Создать рантайм-каталоги. Идемпотентно."""
-        for path in (self.home, self.events_dir, self.artifacts_dir, self.runs_dir):
+        for path in (
+            self.home,
+            self.events_dir,
+            self.artifacts_dir,
+            self.runs_dir,
+            self.global_db_path.parent,
+            self.global_skills_dir,
+        ):
             path.mkdir(parents=True, exist_ok=True)

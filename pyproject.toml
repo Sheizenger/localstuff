@@ -43,10 +43,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["agentos"]
 
+# Настройки по умолчанию едут вместе с пакетом: без них установленный
+# глобально agentctl не смог бы работать в чужом проекте.
+[tool.hatch.build.targets.wheel.force-include]
+"agentos/defaults" = "agentos/defaults"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-exclude = ["HorizonFinance", "var"]
+exclude = ["HorizonFinance", "var", ".agentos"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

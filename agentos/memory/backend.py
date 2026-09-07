@@ -58,6 +58,29 @@ class MemoryBackend(Protocol):
     def stats(self) -> dict[str, int]:
         """Сколько чего накоплено."""
 
+    def get(self, fact_id: str) -> Fact | None:
+        """Достать запись по id."""
+
+    def touch(self, fact_id: str) -> None:
+        """Отметить обращение к записи — по этому видно, что реально нужно."""
+
+    def forget(self, fact_id: str) -> None:
+        """Забыть запись."""
+
+    def recent(self, *, kind: str = "", limit: int = 20) -> list[Fact]:
+        """Последние записи заданного вида."""
+
+    def reindex_vectors(self) -> int:
+        """Пересчитать эмбеддинги при смене модели. Возвращает число записей."""
+
+    @property
+    def index(self) -> Any:
+        """Векторный индекс — нужен диагностике."""
+
+    @property
+    def embedder(self) -> Any:
+        """Модель эмбеддингов — нужна диагностике."""
+
 
 def supports_reflection(backend: Any) -> bool:
     """Умеет ли бэкенд синтезировать знание, а не только искать.

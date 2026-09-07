@@ -213,8 +213,11 @@ def test_mission_synthesis_is_stored_locally_only(backend, runtime, monkeypatch)
 
 
 def test_local_backend_reports_no_reflection(runtime):
-    assert runtime.semantic.name == "sqlite"
-    assert not supports_reflection(runtime.semantic)
+    """По умолчанию память двухуровневая, и синтеза у неё нет."""
+    memory = runtime.semantic
+    assert memory.name == "scoped"
+    assert memory.project.name == "sqlite"
+    assert not supports_reflection(memory)
 
 
 def test_close_releases_the_client_session(backend):

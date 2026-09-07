@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
+from typing import Any
 
 from .bus import EventBus
 from .config import Config
@@ -56,6 +57,8 @@ class Runtime:
             closer = getattr(self.semantic, "close", None)
             if callable(closer):
                 closer()
+        if "global_store" in self.__dict__:
+            self.global_store.close()
         self.store.close()
 
     def __enter__(self) -> Runtime:
@@ -100,9 +103,24 @@ class Runtime:
         return Embedder(self.config, self.router)
 
     @cached_property
+    def global_store(self) -> Store:
+        """База общего знания: ~/.agentos/var/global.db.
+
+        Отдельная база, а не таблица в проектной: общее знание должно
+        переживать удаление проекта и переезжать с человеком.
+        """
+        self.config.global_db_path.parent.mkdir(parents=True, exist_ok=True)
+        return Store(self.config.global_db_path)
+
+    @cached_property
     def local_memory(self) -> SemanticMemory:
-        """Локальная память на SQLite. Есть всегда и служит источником правды."""
+        """Проектная память на SQLite. Есть всегда и служит источником правды."""
         return SemanticMemory(self.store, self.embedder, self.config)
+
+    @cached_property
+    def shared_memory(self) -> SemanticMemory:
+        """Общая память: уроки и предпочтения, применимые в любом проекте."""
+        return SemanticMemory(self.global_store, self.embedder, self.config)
 
     @cached_property
     def semantic(self):
@@ -113,13 +131,20 @@ class Runtime:
         локальной — знание не теряется и миссия не встаёт.
         """
         backend = str(self.config.get("memory.backend", "sqlite")).lower()
-        if backend != "hindsight":
-            return self.local_memory
-        from .memory.hindsight import HindsightMemory
+        project: Any = self.local_memory
+        if backend == "hindsight":
+            from .memory.hindsight import HindsightMemory
 
-        return HindsightMemory(
-            self.local_memory, self.config, bus=self.bus, ledger=self.ledger
-        )
+            project = HindsightMemory(
+                self.local_memory, self.config, bus=self.bus, ledger=self.ledger
+            )
+
+        if not self.config.get("memory.share_across_projects", True):
+            return project
+
+        from .memory.scoped import ScopedMemory
+
+        return ScopedMemory(project, self.shared_memory, self.config)
 
     @cached_property
     def episodic(self) -> EpisodicMemory:
@@ -132,7 +157,9 @@ class Runtime:
         # черновики в общий skills/ репозитория.
         override = os.environ.get("AGENTOS_SKILLS_DIR")
         path = Path(override) if override else self.config.root / "skills"
-        return SkillLibrary(self.store, path)
+        # Общие навыки видны в любом проекте: человек учит систему один раз.
+        extra = () if override else (self.config.global_skills_dir,)
+        return SkillLibrary(self.store, path, extra_dirs=extra)
 
     @cached_property
     def artifacts(self) -> ArtifactStore:

@@ -69,9 +69,18 @@ def parse_skill_file(path: Path) -> tuple[dict[str, Any], str]:
 class SkillLibrary:
     """Индекс навыков в БД + чтение тел с диска."""
 
-    def __init__(self, store: Store, skills_dir: Path) -> None:
+    def __init__(
+        self, store: Store, skills_dir: Path, *, extra_dirs: tuple[Path, ...] = ()
+    ) -> None:
         self.store = store
         self.skills_dir = skills_dir
+        #: Дополнительные каталоги — например, общие навыки из ~/.agentos.
+        self.extra_dirs = tuple(extra_dirs)
+
+    @property
+    def roots(self) -> tuple[Path, ...]:
+        """Все каталоги навыков: проектный и общие."""
+        return (self.skills_dir, *self.extra_dirs)
 
     # ------------------------------------------------------------------ sync
     def sync(self) -> dict[str, int]:
@@ -82,12 +91,16 @@ class SkillLibrary:
         """
         seen: set[str] = set()
         added = updated = 0
-        if self.skills_dir.exists():
-            # Активные навыки — skills/<имя>/SKILL.md, черновики на уровень
-            # глубже — skills/_proposed/<имя>/SKILL.md.
-            found = sorted(
-                [*self.skills_dir.glob("*/SKILL.md"), *self.skills_dir.glob("_proposed/*/SKILL.md")]
-            )
+        # Активные навыки — <каталог>/<имя>/SKILL.md, черновики на уровень
+        # глубже — <каталог>/_proposed/<имя>/SKILL.md. Проектный каталог идёт
+        # первым: одноимённый навык проекта перекрывает общий.
+        found: list[Path] = []
+        for root in self.roots:
+            if root.exists():
+                found += sorted(
+                    [*root.glob("*/SKILL.md"), *root.glob("_proposed/*/SKILL.md")]
+                )
+        if found:
             for skill_md in found:
                 meta, _body = parse_skill_file(skill_md)
                 name = str(meta.get("name") or skill_md.parent.name)
@@ -97,7 +110,9 @@ class SkillLibrary:
                     else str(meta.get("status", STATUS_ACTIVE))
                 )
                 sha = hashlib.sha256(skill_md.read_bytes()).hexdigest()[:16]
-                rel = str(skill_md.relative_to(self.skills_dir.parent))
+                # Абсолютный путь: каталогов теперь несколько, и относительный
+                # к одному из них указывал бы не туда.
+                rel = str(skill_md.resolve())
                 triggers = json.dumps(list(meta.get("triggers") or []), ensure_ascii=False)
                 existing = self.store.one("SELECT sha256 FROM skills WHERE name=?", (name,))
                 with self.store.tx() as conn:
@@ -140,7 +155,9 @@ class SkillLibrary:
 
     # ------------------------------------------------------------------ read
     def _row_to_skill(self, row: dict[str, Any], with_body: bool = False) -> Skill:
-        path = self.skills_dir.parent / row["path"]
+        stored = Path(row["path"])
+        # Записи, сделанные до перехода на абсолютные пути, читаются как раньше.
+        path = stored if stored.is_absolute() else self.skills_dir.parent / stored
         body = ""
         if with_body and path.exists():
             _meta, body = parse_skill_file(path)
