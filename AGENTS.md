@@ -97,6 +97,7 @@ agentctl verify <mission_id> --verdict reject --action "что нужно дод
 | Что | Как это выглядит |
 |---|---|
 | Помнит знания проекта | `agentctl memory search "запрос"` — факты, уроки, решения |
+| Делает вывод из накопленного | `agentctl memory reflect "вопрос"` — только на бэкенде hindsight |
 | Помнит навыки | `agentctl skill list`, тело — `agentctl skill show <имя>` |
 | Считает токены и деньги | `agentctl status` — расход и остаток бюджета |
 | Переживает обрыв сессии | чекпоинты в `var/runs/`, указатель в `var/resume.json` |
@@ -125,7 +126,7 @@ agentctl verify <mission_id> --verdict reject --action "что нужно дод
 ## 6. Где что лежит
 
 ```
-config/agentos.yaml     бюджеты, режимы, квоты, самопроверка
+config/agentos.yaml     бюджеты, режимы, квоты, самопроверка, бэкенд памяти
 config/models.yaml      каталог моделей по тирам и ценам
 config/policy.yaml      что разрешено, что требует человека
 config/agents/*.yaml    роли субагентов — правятся здесь, не в коде
