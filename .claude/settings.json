@@ -1,0 +1,16 @@
+{
+  "$comment": "AgentOS: на старте сессии подхватываем незавершённую работу одной строкой.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/resume.sh --announce --quiet",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
