@@ -848,6 +848,33 @@ def cmd_approve(args: argparse.Namespace) -> int:
         rt.close()
 
 
+def cmd_install(args: argparse.Namespace) -> int:
+    """Подключить AgentOS к текущему проекту."""
+    from pathlib import Path as _Path
+
+    from .install import PLATFORMS, default_root, install, render_report
+
+    root = _Path(args.path).resolve() if args.path else default_root()
+    platforms = tuple(args.platform) if args.platform else PLATFORMS
+    unknown = [p for p in platforms if p not in PLATFORMS]
+    if unknown:
+        out(f"неизвестная платформа: {', '.join(unknown)}. Доступны: {', '.join(PLATFORMS)}")
+        return 2
+
+    out(f"подключаю AgentOS к {root}")
+    report = install(root, platforms=platforms, with_mcp=not args.no_mcp)
+    out(render_report(report, root))
+    return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    """Поднять MCP-сервер на stdio. Так AgentOS подключается к агент-хосту."""
+    from .mcp_server import AgentOSServer
+
+    AgentOSServer().serve()
+    return 0
+
+
 def cmd_events(args: argparse.Namespace) -> int:
     rt = _runtime(args)
     try:
@@ -1056,6 +1083,23 @@ def build_parser() -> argparse.ArgumentParser:
     adeny = approve_sub.add_parser("deny", help="отказать")
     adeny.add_argument("approval_id")
     adeny.set_defaults(func=cmd_approve)
+
+    install_cmd = sub.add_parser(
+        "install", help="подключить AgentOS к проекту: точки входа и MCP-сервер"
+    )
+    install_cmd.add_argument("path", nargs="?", default="", help="каталог проекта")
+    install_cmd.add_argument(
+        "--platform", action="append", help="claude | codex | gemini | cursor (можно несколько)"
+    )
+    install_cmd.add_argument(
+        "--no-mcp", action="store_true", help="не регистрировать MCP-сервер"
+    )
+    install_cmd.set_defaults(func=cmd_install)
+
+    mcp = sub.add_parser(
+        "mcp", help="MCP-сервер на stdio: подключение к любому агент-хосту"
+    )
+    mcp.set_defaults(func=cmd_mcp)
 
     events = sub.add_parser("events", help="журнал событий")
     events.add_argument("--mission", default="")
