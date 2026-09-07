@@ -269,10 +269,13 @@ struct AppData: Codable {
     var recurring: [RecurringRule] = []
     /// Чему научился импорт выписки: нормализованное описание → категория приложения.
     var merchantRules: [String: UUID] = [:]
+    var notifications: NotificationSettings = NotificationSettings()
+    /// Что уже сообщали: ключ события → когда. Защита от повторов.
+    var notificationLog: [String: Date] = [:]
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion, profile, categories, goals, transactions, contributions
-        case basket, receiptAliases, recurring, merchantRules
+        case basket, receiptAliases, recurring, merchantRules, notifications, notificationLog
     }
 }
 
@@ -295,6 +298,8 @@ extension AppData {
         data.receiptAliases = try container.decodeIfPresent([String: String].self, forKey: .receiptAliases) ?? [:]
         data.recurring = try container.decodeIfPresent([RecurringRule].self, forKey: .recurring) ?? []
         data.merchantRules = try container.decodeIfPresent([String: UUID].self, forKey: .merchantRules) ?? [:]
+        data.notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
+        data.notificationLog = try container.decodeIfPresent([String: Date].self, forKey: .notificationLog) ?? [:]
 
         if version < 2 {
             // Раньше режим распределения был один на все цели и лежал в профиле.
@@ -424,6 +429,15 @@ enum Fmt {
         f.locale = locale
         f.calendar = Cal.ru
         f.dateFormat = "d MMMM, EEEE"
+        return f
+    }()
+
+    /// Ключ вида «2026-09-04» — для устойчивых идентификаторов событий.
+    static let stampKey: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Cal.ru
+        f.dateFormat = "yyyy-MM-dd"
         return f
     }()
 

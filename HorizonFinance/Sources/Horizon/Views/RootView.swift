@@ -31,6 +31,7 @@ struct RootView: View {
         .onAppear {
             // Аренда и подписки известны заранее — создаём их сами, а не ждём ручного ввода.
             store.applyRecurringRules()
+            store.runNotifications()
         }
         .sheet(isPresented: $bus.showReceiptImport) {
             ReceiptImportView()

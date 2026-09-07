@@ -57,6 +57,7 @@ enum SelfCheck {
         checkReceipts()
         checkRecurring()
         checkPlanFact()
+        checkNotifications()
         checkStatement()
         checkMigration()
         checkFormatting()
@@ -616,6 +617,119 @@ enum SelfCheck {
                "прогноз обязательных учитывает ещё не списанное")
         expect(!planned.planFact.essentialsUnderCovered,
                "с шаблоном обязательные считаются покрытыми")
+    }
+
+    /// Уведомления: планировщик — чистая логика, её можно проверить целиком.
+    private static func checkNotifications() {
+        print("\nУведомления:")
+
+        func makeData(flexible: Double) -> AppData {
+            var data = AppData.starter()
+            data.notifications.enabled = true
+            data.profile.flexibleLimit = 500
+            data.profile.savingsPlan = 1000
+            let cafe = data.categories.first(where: { $0.flow == .expense && $0.kind == .flexible })!
+            if flexible > 0 {
+                data.transactions = [
+                    Txn(date: day(2026, 9, 10), amount: flexible, flow: .expense, categoryID: cafe.id)
+                ]
+            }
+            return data
+        }
+
+        func plan(_ data: AppData, at date: Date) -> [PlannedNotification] {
+            NotificationPlanner.plan(data: data, analytics: Analytics(data: data, today: date), now: date)
+        }
+
+        // Выключенные уведомления молчат.
+        var off = makeData(flexible: 560)
+        off.notifications.enabled = false
+        expect(plan(off, at: day(2026, 9, 15)).isEmpty, "выключенные уведомления ничего не шлют")
+
+        // Пороги.
+        let low = plan(makeData(flexible: 320), at: day(2026, 9, 15)).filter { $0.id.hasPrefix("limit-") }
+        expect(low.count == 1 && low.first?.id.contains("60") == true,
+               "64% лимита — только порог 60%", low.map { $0.id }.joined(separator: ","))
+
+        let mid = plan(makeData(flexible: 430), at: day(2026, 9, 15)).filter { $0.id.hasPrefix("limit-") }
+        expect(mid.count == 2, "86% лимита — пороги 60 и 85", "\(mid.count)")
+
+        let over = plan(makeData(flexible: 560), at: day(2026, 9, 15)).filter { $0.id.hasPrefix("limit-") }
+        expect(over.count == 3, "перерасход — все три порога", "\(over.count)")
+        expect(over.last?.body.contains("Перерасход") == true, "текст о перерасходе объясняет, что делать")
+        expect(over.allSatisfy { $0.id.contains("\(MonthKey(year: 2026, month: 9).id)") },
+               "в ключе есть месяц — в октябре пороги придут заново")
+        expect(Set(over.map { $0.id }).count == over.count, "идентификаторы уникальны")
+
+        // Ничего не потрачено — предупреждать не о чем.
+        expect(plan(makeData(flexible: 0), at: day(2026, 9, 15)).filter { $0.id.hasPrefix("limit-") }.isEmpty,
+               "без трат порогов нет")
+
+        // Предстоящий платёж.
+        var withRule = makeData(flexible: 0)
+        var rent = RecurringRule()
+        rent.title = "Аренда"
+        rent.amount = 1250
+        rent.unit = .month
+        rent.dayOfMonth = 25
+        rent.startDate = day(2026, 1, 1)
+        withRule.recurring = [rent]
+
+        let due = plan(withRule, at: day(2026, 9, 20)).filter { $0.id.hasPrefix("due-") }
+        expect(due.count == 1, "одно напоминание о ближайшем платеже", "\(due.count)")
+        expect(due.first?.id.contains("2026-09-25") == true, "в ключе стоит дата платежа")
+        if let date = due.first?.date {
+            let parts = Cal.ru.dateComponents([.day, .hour], from: date)
+            expect(parts.day == 23 && parts.hour == 9, "предупреждение за два дня, утром",
+                   "\(String(describing: parts.day)):\(String(describing: parts.hour))")
+        } else {
+            expect(false, "у напоминания есть дата")
+        }
+
+        // Если предупреждать уже поздно — доставляем сразу.
+        var lateWarning = withRule
+        lateWarning.notifications.leadDays = 10
+        let immediate = plan(lateWarning, at: day(2026, 9, 20)).filter { $0.id.hasPrefix("due-") }
+        expect(immediate.first?.date == nil, "просроченное предупреждение уходит немедленно")
+
+        // Итог месяца — только в первых числах.
+        var withHistory = makeData(flexible: 0)
+        let salary = withHistory.categories.first(where: { $0.flow == .income })!
+        withHistory.transactions = [
+            Txn(date: day(2026, 9, 5), amount: 4600, flow: .income, categoryID: salary.id)
+        ]
+        let summary = plan(withHistory, at: day(2026, 10, 2)).filter { $0.id.hasPrefix("summary-") }
+        expect(summary.count == 1, "второго октября приходит итог сентября", "\(summary.count)")
+        expect(summary.first?.title.contains("Сентябрь") == true, "в заголовке — закрытый месяц",
+               summary.first?.title ?? "—")
+        expect(plan(withHistory, at: day(2026, 10, 15)).filter { $0.id.hasPrefix("summary-") }.isEmpty,
+               "в середине месяца итог уже не шлётся")
+
+        // День зарплаты.
+        let payday = plan(withHistory, at: day(2026, 9, 5)).filter { $0.id.hasPrefix("payday-") }
+        expect(payday.count == 1, "в день дохода — напоминание отложить", "\(payday.count)")
+        expect(payday.first?.body.contains("до трат") == true, "формулировка про решение до трат")
+        expect(plan(withHistory, at: day(2026, 9, 6)).filter { $0.id.hasPrefix("payday-") }.isEmpty,
+               "на следующий день напоминание не повторяется")
+
+        // Хранилище не шлёт одно и то же дважды.
+        let store = Store(data: makeData(flexible: 560), persists: false)
+        let first = store.pendingNotifications(now: day(2026, 9, 15))
+        expect(first.count == 3, "к отправке три порога", "\(first.count)")
+
+        store.markNotified(first, now: day(2026, 9, 15))
+        expect(store.pendingNotifications(now: day(2026, 9, 15)).isEmpty,
+               "повторно те же события не отправляются")
+
+        // Новый месяц — пороги приходят заново.
+        var nextMonth = store.data
+        let cafe = nextMonth.categories.first(where: { $0.flow == .expense && $0.kind == .flexible })!
+        nextMonth.transactions.append(
+            Txn(date: day(2026, 10, 8), amount: 560, flow: .expense, categoryID: cafe.id)
+        )
+        let october = Store(data: nextMonth, persists: false)
+        expect(!october.pendingNotifications(now: day(2026, 10, 15)).filter { $0.id.hasPrefix("limit-") }.isEmpty,
+               "в октябре пороги считаются заново")
     }
 
     /// Выписка банка: колонки, форматы чисел и автокатегоризация.

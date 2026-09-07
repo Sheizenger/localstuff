@@ -21,6 +21,7 @@ struct SettingsView: View {
             planCard
             paceCard
             recurringCard
+            notificationsCard
             categoriesCard
             dataCard
         }
@@ -260,6 +261,81 @@ struct SettingsView: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture { editingRule = rule }
+    }
+
+    // MARK: Уведомления
+
+    private var notificationsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionTitle(
+                title: "Уведомления",
+                subtitle: "приложение молчит, пока вы не разрешите — и говорит только по делу"
+            )
+
+            if !Notifier.isSupported {
+                Label("Уведомления работают только в собранном приложении. Соберите его командой ./build_app.sh --install и запустите из /Applications — при запуске через swift run системный центр уведомлений недоступен.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !store.data.notifications.enabled {
+                Text("Пока выключены. Приложение будет предупреждать о порогах лимита, ближайших списаниях, дне зарплаты и итоге закрытого месяца.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Разрешить уведомления") {
+                    Notifier.requestAuthorization { granted in
+                        store.setNotificationsEnabled(granted)
+                        message = granted
+                            ? "Уведомления включены."
+                            : "Система не дала разрешение. Проверьте «Системные настройки → Уведомления → Горизонт»."
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Toggle("Пороги лимита: 60%, 85%, 100%", isOn: notificationBinding(\.limitThresholds))
+                Toggle("Напоминания о регулярных платежах", isOn: notificationBinding(\.upcomingPayments))
+                if store.data.notifications.upcomingPayments {
+                    Stepper(value: notificationBinding(\.leadDays), in: 0...7) {
+                        Text("Предупреждать за \(Fmt.daysWord(store.data.notifications.leadDays))")
+                            .font(.callout)
+                    }
+                    .frame(width: 320)
+                }
+                Toggle("Итог месяца в первых числах", isOn: notificationBinding(\.monthSummary))
+                Toggle("В день поступления дохода — напомнить отложить", isOn: notificationBinding(\.payday))
+
+                Text("Каждое событие приходит один раз: пороги — раз в месяц, платежи — раз на дату, итог — раз за месяц.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button("Проверить") {
+                        Notifier.deliver(
+                            id: "test-\(Int(Date().timeIntervalSince1970))",
+                            title: "Горизонт на связи",
+                            body: "Так будут выглядеть предупреждения о лимите и ближайших списаниях."
+                        )
+                    }
+                    Button("Выключить", role: .destructive) {
+                        store.setNotificationsEnabled(false)
+                    }
+                    Spacer()
+                    Text("Отправлено событий: \(store.data.notificationLog.count)")
+                        .font(.caption2)
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private func notificationBinding<Value>(_ keyPath: WritableKeyPath<NotificationSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { store.data.notifications[keyPath: keyPath] },
+            set: { store.data.notifications[keyPath: keyPath] = $0 }
+        )
     }
 
     // MARK: Категории

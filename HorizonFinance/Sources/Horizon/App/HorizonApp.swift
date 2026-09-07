@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct HorizonApp: App {
@@ -52,11 +53,26 @@ struct HorizonApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Нужно, чтобы приложение вело себя как обычное оконное даже при запуске через `swift run`.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+
+        // Вне бандла системный центр уведомлений роняет процесс — потому и проверка.
+        if Notifier.isSupported {
+            UNUserNotificationCenter.current().delegate = self
+        }
+    }
+
+    /// Показывать баннер, даже когда приложение открыто: иначе предупреждение о лимите
+    /// увидит только тот, кто и так смотрит на экран.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

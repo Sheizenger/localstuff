@@ -85,6 +85,7 @@ final class Store: ObservableObject {
     func addTransaction(_ txn: Txn) {
         data.transactions.append(txn)
         data.transactions.sort { $0.date > $1.date }
+        runNotifications()
     }
 
     func updateTransaction(_ txn: Txn) {
@@ -332,6 +333,7 @@ final class Store: ObservableObject {
             applyReceiptPrices(receipt, chainID: chainID)
         }
 
+        runNotifications()
         return created
     }
 
@@ -344,6 +346,52 @@ final class Store: ObservableObject {
             guard unit > 0.01, unit < 500 else { continue }
             let key = BasketSettings.overrideKey(chainID: chainID, productID: productID)
             data.basket.priceOverrides[key] = unit
+        }
+    }
+
+    // MARK: Уведомления
+
+    /// О чём стоит сообщить прямо сейчас — без учёта того, доступна ли система.
+    /// Чистая часть: её можно прогнать в самопроверке.
+    func pendingNotifications(now: Date = Date()) -> [PlannedNotification] {
+        guard data.notifications.enabled else { return [] }
+        let planned = NotificationPlanner.plan(
+            data: data,
+            analytics: Analytics(data: data, today: now),
+            now: now
+        )
+        return planned.filter { data.notificationLog[$0.id] == nil }
+    }
+
+    /// Отмечает события как отправленные и подчищает старые записи.
+    func markNotified(_ items: [PlannedNotification], now: Date = Date()) {
+        guard !items.isEmpty else { return }
+        var log = data.notificationLog
+        for item in items { log[item.id] = now }
+        if let cutoff = Cal.ru.date(byAdding: .month, value: -3, to: now) {
+            log = log.filter { $0.value > cutoff }
+        }
+        data.notificationLog = log
+    }
+
+    /// Отправляет всё накопившееся. Вне собранного бандла система недоступна,
+    /// и тогда мы ничего не отмечаем — иначе первый запуск настоящего приложения промолчал бы.
+    func runNotifications(now: Date = Date()) {
+        guard Notifier.isSupported else { return }
+        let pending = pendingNotifications(now: now)
+        guard !pending.isEmpty else { return }
+
+        for item in pending {
+            Notifier.schedule(id: item.id, title: item.title, body: item.body, at: item.date)
+        }
+        markNotified(pending, now: now)
+    }
+
+    /// Отключение уведомлений снимает и всё запланированное.
+    func setNotificationsEnabled(_ enabled: Bool) {
+        data.notifications.enabled = enabled
+        if !enabled {
+            Notifier.cancelAllPending()
         }
     }
 
@@ -413,6 +461,7 @@ final class Store: ObservableObject {
         }
         if created > 0 {
             data.transactions.sort { $0.date > $1.date }
+            runNotifications()
         }
         return created
     }
