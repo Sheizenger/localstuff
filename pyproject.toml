@@ -14,6 +14,8 @@ anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 google = ["google-genai>=0.3"]
 mcp = ["mcp>=1.0"]
+hindsight = ["hindsight-client>=0.1"]
+hindsight-embedded = ["hindsight-all>=0.1"]
 vector = ["numpy>=1.26"]
 dev = [
     "pytest>=8.0",
@@ -28,6 +30,7 @@ all = [
     "google-genai>=0.3",
     "mcp>=1.0",
     "numpy>=1.26",
+    "hindsight-client>=0.1",
 ]
 
 [project.scripts]

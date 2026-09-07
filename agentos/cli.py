@@ -153,8 +153,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             )
 
         out("")
+        memory = rt.semantic
+        out(f"Память: бэкенд {memory.name}, записей {memory.stats() or '(пусто)'}")
+        if memory.name == "hindsight":
+            if memory.remote_available():
+                out(f"  [✓] Hindsight отвечает, банк {memory.bank_id}")
+            else:
+                warnings.append(
+                    f"бэкенд памяти hindsight настроен, но сервер не отвечает"
+                    f" ({memory.mode}): работает локальная память, синтез недоступен"
+                )
         out(f"Навыки: {rt.skills.stats() or '(нет)'}")
-        out(f"Память: {rt.semantic.stats() or '(пусто)'}")
         pending = rt.capabilities.pending()
         if pending:
             out("")
@@ -733,16 +742,37 @@ def cmd_memory(args: argparse.Namespace) -> int:
             for fact in facts:
                 out(f"  {fact.score:.4f} {fact.as_line()}")
             return 0
+        if args.memory_action == "reflect":
+            from .memory.backend import supports_reflection
+
+            memory = rt.semantic
+            if not supports_reflection(memory):
+                out(f"бэкенд '{memory.name}' не умеет синтез — только поиск.")
+                out("Включи memory.backend: hindsight в config/agentos.yaml.")
+                return 2
+            text = memory.reflect(args.query, mission_id=args.mission or "")
+            if not text:
+                out("память не дала синтеза (сервер недоступен или нечего обобщать)")
+                return 1
+            out(text)
+            return 0
         if args.memory_action == "add":
             fact_id = rt.semantic.add(
                 args.content, subject=args.subject or "", kind=args.kind, source="человек"
             )
             out(f"записано: {fact_id}")
             return 0
-        stats = rt.semantic.stats()
+        memory = rt.semantic
+        stats = memory.stats()
+        out(f"бэкенд памяти: {memory.name}")
+        if memory.name == "hindsight":
+            reachable = memory.remote_available()
+            out(f"  банк: {memory.bank_id} ({memory.mode})")
+            state = "отвечает" if reachable else "недоступен — работает локальная память"
+            out(f"  сервер: {state}")
         out(f"фактов и уроков: {stats or '(пусто)'}")
         out(f"навыки: {rt.skills.stats() or '(нет)'}")
-        out(f"векторный поиск: {rt.semantic.index.backend}, эмбеддер {rt.embedder.spec.id}")
+        out(f"векторный поиск: {memory.index.backend}, эмбеддер {rt.embedder.spec.id}")
         return 0
     finally:
         rt.close()
@@ -998,6 +1028,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--kind", default="fact", choices=["fact", "lesson", "decision", "preference"]
     )
     madd.set_defaults(func=cmd_memory)
+    mreflect = memory_sub.add_parser(
+        "reflect", help="вывод из накопленного, а не список похожих записей"
+    )
+    mreflect.add_argument("query")
+    mreflect.add_argument("--mission", default="")
+    mreflect.set_defaults(func=cmd_memory)
     memory_sub.add_parser("stats").set_defaults(func=cmd_memory)
 
     capability = sub.add_parser("capability", help="подключённые возможности и каталог MCP")

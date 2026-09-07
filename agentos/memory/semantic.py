@@ -71,6 +71,17 @@ class Fact:
 
 
 class SemanticMemory:
+    """Локальная память на SQLite: FTS5 плюс векторы, без единого ключа.
+
+    Бэкенд по умолчанию и источник правды: всё, что система знает, лежит
+    здесь, даже когда включён внешний бэкенд с синтезом.
+    """
+
+    #: Имя бэкенда в диагностике.
+    name = "sqlite"
+    #: Синтезировать наблюдения и ментальные модели не умеет — только искать.
+    can_reflect = False
+
     def __init__(self, store: Store, embedder: Embedder, config: Any = None) -> None:
         self.store = store
         self.embedder = embedder
@@ -79,6 +90,10 @@ class SemanticMemory:
         if config is not None:
             backend = str(config.get("memory.vector.backend", "auto"))
         self.index = BruteForceIndex(store, backend)
+
+    def available(self) -> bool:
+        """Локальная память доступна всегда: она и есть запасной вариант."""
+        return True
 
     # ------------------------------------------------------------------ write
     def add(

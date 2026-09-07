@@ -52,6 +52,8 @@ class ConsolidationResult:
     proposed_skills: list[str] = field(default_factory=list)
     promoted_skills: list[str] = field(default_factory=list)
     scored_skills: list[str] = field(default_factory=list)
+    #: Синтез внешней памяти: вывод из накопленного, а не набор похожих записей.
+    reflection: str = ""
 
 
 class Improver:
@@ -105,6 +107,8 @@ class Improver:
             if path:
                 result.proposed_skills.append(name)
 
+        result.reflection = self.reflect_on_mission(mission_id)
+
         if self.rt.config.get("improve.auto_promote_skills", False):
             for name in result.proposed_skills:
                 if self.promote_skill(name):
@@ -121,6 +125,48 @@ class Improver:
             summary=f"консолидация: {len(result.facts)} фактов, {len(result.lessons)} уроков",
         )
         return result
+
+    def reflect_on_mission(self, mission_id: str) -> str:
+        """Спросить у памяти вывод из накопленного и сохранить его.
+
+        Разница с обычным поиском принципиальная: search возвращает похожие
+        записи, reflect — то, что из них следует. Именно это делает
+        накопление знания улучшением, а не архивом.
+
+        Синтез кладётся ТОЛЬКО в локальную память, минуя зеркалирование:
+        иначе вывод вернулся бы во внешнюю память как новый исходный факт и
+        следующий синтез строился бы уже на собственном эхе.
+        """
+        from ..memory.backend import supports_reflection
+
+        if not self.rt.config.get("improve.reflect_on_finish", True):
+            return ""
+        memory = self.rt.semantic
+        if not supports_reflection(memory):
+            return ""
+
+        mission = self.rt.sm.get_mission(mission_id) or {}
+        goal = str(mission.get("goal", "")).strip()
+        if not goal:
+            return ""
+
+        text = memory.reflect(
+            f"Что теперь известно о проекте после работы над целью: {goal}",
+            mission_id=mission_id,
+            context="итог миссии AgentOS",
+        )
+        if not text:
+            return ""
+
+        self.rt.local_memory.add(
+            text,
+            kind=KIND_LESSON,
+            subject="синтез памяти",
+            source=f"reflect/{mission_id}",
+            confidence=0.6,
+            mission_id=mission_id,
+        )
+        return text
 
     # ------------------------------------------------------------- извлечение
     def _distill(self, mission_id: str) -> dict[str, Any]:

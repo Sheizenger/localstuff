@@ -52,6 +52,10 @@ class Runtime:
     def close(self) -> None:
         if "capabilities" in self.__dict__:
             self.capabilities.shutdown()
+        if "semantic" in self.__dict__:
+            closer = getattr(self.semantic, "close", None)
+            if callable(closer):
+                closer()
         self.store.close()
 
     def __enter__(self) -> Runtime:
@@ -96,8 +100,26 @@ class Runtime:
         return Embedder(self.config, self.router)
 
     @cached_property
-    def semantic(self) -> SemanticMemory:
+    def local_memory(self) -> SemanticMemory:
+        """Локальная память на SQLite. Есть всегда и служит источником правды."""
         return SemanticMemory(self.store, self.embedder, self.config)
+
+    @cached_property
+    def semantic(self):
+        """Настроенный бэкенд памяти.
+
+        По умолчанию это локальная память. Бэкенд hindsight оборачивает её:
+        пишет в обе, ищет во внешней, а при её недоступности работает на
+        локальной — знание не теряется и миссия не встаёт.
+        """
+        backend = str(self.config.get("memory.backend", "sqlite")).lower()
+        if backend != "hindsight":
+            return self.local_memory
+        from .memory.hindsight import HindsightMemory
+
+        return HindsightMemory(
+            self.local_memory, self.config, bus=self.bus, ledger=self.ledger
+        )
 
     @cached_property
     def episodic(self) -> EpisodicMemory:

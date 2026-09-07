@@ -24,6 +24,31 @@ budget:
   subagent_report_tokens: 1200
 
 memory:
+  # sqlite    — локальная память: FTS5 + векторы, работает без единого ключа
+  # hindsight — Hindsight поверх локальной: добавляет консолидацию наблюдений
+  #             и ментальные модели, то есть синтез, а не только поиск.
+  #             Требует поднятого сервера Hindsight и ключа модели у него.
+  #             Локальная память при этом остаётся источником правды.
+  backend: sqlite
+
+  hindsight:
+    mode: server              # server | embedded
+    base_url: ""              # или переменная окружения HINDSIGHT_BASE_URL
+    bank_id: ""               # пусто -> agentos-<имя проекта>
+    mirror: true              # дублировать записи в локальную память
+    retain_async: true        # не ждать извлечения через модель на каждой записи
+    prefer_observations: true # синтезированные наблюдения важнее сырых записей
+    recall_budget: mid        # low | mid | high — глубина поиска
+    reflect_budget: low
+    recall_max_tokens: 4096
+    reflect_max_tokens: 1500
+    timeout_s: 60
+    cooldown_s: 60            # молчать столько после сбоя, не долбя лежащий сервер
+    # только для mode: embedded
+    llm_provider: openai
+    llm_model: gpt-5-mini
+    llm_api_key_env: OPENAI_API_KEY
+
   db: agentos.db
   events_dir: events
   artifacts_dir: artifacts
@@ -68,6 +93,9 @@ self_check:
 
 improve:
   enabled: true
+  # Спрашивать у памяти вывод из накопленного по завершении миссии.
+  # Работает только на бэкенде, который умеет синтез (hindsight).
+  reflect_on_finish: true
   # Автопромоушен черновика навыка в skills/ без человека.
   auto_promote_skills: false
   retro_on_finish: true
