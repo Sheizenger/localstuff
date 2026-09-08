@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..bus import EV_MEMORY_WRITE, EV_SKILL_PROPOSED, EV_SKILL_USED
-from ..errors import ProviderUnavailable, QuotaExhausted
+from ..errors import ProviderError
 from ..memory.semantic import KIND_FACT, KIND_LESSON
 from ..memory.working import GOAL_MARKER, SCHEMA_MARKER, truncate_to_tokens
 from ..providers.base import Message
@@ -204,7 +204,7 @@ class Improver:
                 system=role.system,
                 max_tokens=min(role.max_output_tokens, route.spec.max_output),
             )
-        except (QuotaExhausted, ProviderUnavailable):
+        except ProviderError:
             return self._heuristic(mission_id)
         self.rt.ledger.record(
             provider=route.spec.provider,

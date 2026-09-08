@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..bus import EV_MISSION_CREATED
-from ..errors import ProviderUnavailable, QuotaExhausted
+from ..errors import ProviderError
 from ..memory.working import GOAL_MARKER, SCHEMA_MARKER
 from ..providers.base import Message
 from ..runtime import Runtime
@@ -117,9 +117,11 @@ class Intake:
                 system=INTAKE_SYSTEM,
                 max_tokens=min(2000, route.spec.max_output),
             )
-        except (QuotaExhausted, ProviderUnavailable, Exception):
-            # Приём цели не должен падать из-за провайдера: минимальный
-            # набор критериев всегда лучше, чем отсутствие миссии.
+        except (ProviderError, OSError):
+            # Приём цели не должен падать из-за провайдера или сети: минимальный
+            # набор критериев лучше, чем отсутствие миссии. А вот собственная
+            # ошибка в коде обязана всплыть: раньше её глотал `except Exception`,
+            # и миссия молча получала не те критерии приёмки.
             return self._heuristic_spec(goal)
         self.rt.ledger.record(
             provider=route.spec.provider,

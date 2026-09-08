@@ -13,7 +13,7 @@ from typing import Any
 
 from ..agents.roles import RoleRouter
 from ..bus import EV_PLAN_BUILT, EV_TASK_CREATED
-from ..errors import ProviderUnavailable, QuotaExhausted
+from ..errors import ProviderError
 from ..memory.working import GOAL_MARKER, SCHEMA_MARKER
 from ..providers.base import Message
 from ..runtime import Runtime
@@ -108,7 +108,9 @@ class Planner:
                 system=role.system + PLANNER_SYSTEM_SUFFIX,
                 max_tokens=min(role.max_output_tokens, route.spec.max_output),
             )
-        except (QuotaExhausted, ProviderUnavailable):
+        except ProviderError:
+            # Любая ошибка провайдера, не только квота: план по умолчанию
+            # исполним, а отсутствие плана останавливает миссию.
             return FALLBACK_PLAN
         self.rt.ledger.record(
             provider=route.spec.provider,

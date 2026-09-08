@@ -127,3 +127,20 @@ def test_role_can_be_overridden_without_copying_the_rest(tmp_path, monkeypatch):
 @pytest.mark.parametrize("name", ["reviewer", "critic", "planner"])
 def test_default_roles_are_available_anywhere(name):
     assert Config.load().role(name)
+
+
+def test_contract_renderings_cannot_drift():
+    """Контракт доставляется двумя каналами и обязан совпадать по существу."""
+    from agentos.contract import INVARIANTS, operations, render_instructions, render_markdown
+
+    markdown = render_markdown()
+    instructions = render_instructions()
+
+    for cli, tool in operations():
+        command = cli.split()[1]  # resume, goal, task, verify, memory
+        assert command in markdown, f"в файле-инструкции нет операции {command}"
+        assert tool in instructions, f"в контракте MCP нет инструмента {tool}"
+
+    for invariant in INVARIANTS:
+        head = invariant.split(".")[0]
+        assert head in markdown and head in instructions, "инвариант потерян в одном из текстов"

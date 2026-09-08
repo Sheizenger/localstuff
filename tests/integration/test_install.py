@@ -127,3 +127,21 @@ def test_codex_gets_a_manual_step_not_a_silent_edit(project):
 
     assert any("config.toml" in item for item in report.manual)
     assert not (project / ".codex").exists()
+
+
+def test_cursor_rule_gets_frontmatter(project):
+    """Без alwaysApply Cursor не применит правило, и контракт не доедет."""
+    install(project, platforms=("cursor",))
+
+    text = (project / ".cursor" / "rules" / "agentos.mdc").read_text(encoding="utf-8")
+
+    assert text.startswith("---\n"), "правило Cursor начинается с frontmatter"
+    assert "alwaysApply: true" in text
+    assert BEGIN in text
+
+
+def test_markdown_entrypoints_have_no_frontmatter(project):
+    """AGENTS.md — обычный markdown: frontmatter там был бы мусором."""
+    install(project, platforms=("claude",))
+
+    assert not (project / "AGENTS.md").read_text(encoding="utf-8").startswith("---")

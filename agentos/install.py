@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .contract import render_markdown
 from .paths import PROJECT_DIR
 
 BEGIN = "<!-- agentos:begin -->"
@@ -27,44 +28,6 @@ END = "<!-- agentos:end -->"
 
 #: Куда пишем точки входа. Ключ — имя платформы для --platform.
 PLATFORMS = ("claude", "codex", "gemini", "cursor")
-
-CONTRACT = """## AgentOS
-
-Этот воркспейс подключён к AgentOS — системе, которая держит состояние
-работы на диске и продолжает начатое сама после обрыва сессии и после
-исчерпания лимитов токенов.
-
-**Первое действие в каждой сессии:**
-
-```bash
-agentctl resume --announce
-```
-
-Одна строка ответа скажет, есть ли незавершённая работа, чего она ждёт и
-когда продолжит. Если работа есть — продолжай её, не спрашивая человека.
-
-**Новая задача от человека** — `agentctl goal "…"`, сколь угодно
-абстрактная: система сама зафиксирует критерии приёмки, построит план и
-выдаст задания субагентам.
-
-**Выполнил задание** — верни результат отчётом, а не транскриптом:
-
-```bash
-agentctl task report <task_id> --json '{"summary":"…","findings":[]}'
-```
-
-**Упёрся в стену** — `agentctl task block <task_id> --reason quota|capability|approval`.
-Заблокированная задача не останавливает остальные ветки, а по квоте
-продолжится сама после сброса лимитов.
-
-**Готово — это приёмка, а не «кончились задачи»:** `agentctl verify <mission_id>`.
-Красный программный гейт отменяет любой вердикт, включая твой.
-
-Память проекта и общий опыт — `agentctl memory search "…"`. Не спрашивай
-человека о том, что можешь узнать сам.
-
-Полный контракт: [AGENTS.md](AGENTS.md). Если подключён MCP-сервер AgentOS,
-те же операции доступны инструментами `agentos_*`."""
 
 CONFIG_STUB = """# Настройки AgentOS для этого проекта.
 #
@@ -128,7 +91,24 @@ def server_command() -> list[str]:
 # --------------------------------------------------------------- примитивы
 
 
-def write_marked_block(path: Path, body: str, *, title: str = "") -> tuple[bool, bool]:
+#: Frontmatter правила Cursor. Без alwaysApply правило считается
+#: «подключаемым по требованию», и агент его просто не увидит.
+CURSOR_FRONTMATTER = (
+    "---\n"
+    "description: AgentOS — контракт работы агентов в этом проекте\n"
+    "alwaysApply: true\n"
+    "---\n\n"
+)
+
+
+def preamble_for(path: Path) -> str:
+    """Что должно стоять до блока, чтобы платформа его учла."""
+    return CURSOR_FRONTMATTER if path.suffix == ".mdc" else ""
+
+
+def write_marked_block(
+    path: Path, body: str, *, title: str = "", preamble: str = ""
+) -> tuple[bool, bool]:
     """Вписать блок между маркерами. Возвращает (существовал, изменился).
 
     Чужой текст в файле не трогается: правится только то, что между
@@ -137,9 +117,9 @@ def write_marked_block(path: Path, body: str, *, title: str = "") -> tuple[bool,
     block = f"{BEGIN}\n{body}\n{END}"
     existed = path.exists()
     if not existed:
-        header = f"# {title}\n\n" if title else ""
+        header = f"# {title}\n\n" if title and not preamble else ""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{header}{block}\n", encoding="utf-8")
+        path.write_text(f"{preamble}{header}{block}\n", encoding="utf-8")
         return False, True
 
     text = path.read_text(encoding="utf-8")
@@ -243,7 +223,9 @@ def install(
     if "cursor" in platforms:
         entrypoints.append((root / ".cursor" / "rules" / "agentos.mdc", "AgentOS"))
     for path, title in entrypoints:
-        existed, changed = write_marked_block(path, CONTRACT, title=title)
+        existed, changed = write_marked_block(
+            path, render_markdown(), title=title, preamble=preamble_for(path)
+        )
         report.note(path, root, existed, changed)
 
     # 3. Хук старта сессии для Claude Code: подхват работы без напоминания.

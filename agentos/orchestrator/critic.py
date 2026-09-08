@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from ..agents.report import Verdict
 from ..bus import EV_CRITIC_VERDICT, EV_GATE_RESULT
-from ..errors import ProviderUnavailable, QuotaExhausted
+from ..errors import ProviderError
 from ..memory.working import GOAL_MARKER, SCHEMA_MARKER, truncate_to_tokens
 from ..providers.base import Message
 from ..runtime import Runtime
@@ -170,7 +170,7 @@ class Critic:
         )
         try:
             route = self.rt.router.critic_route(role.tier, producer)
-        except (QuotaExhausted, ProviderUnavailable) as exc:
+        except ProviderError as exc:
             # Без критика результат не объявляется готовым — только needs_human.
             return Verdict(
                 verdict="needs_human",
@@ -200,7 +200,7 @@ class Critic:
                 system=role.system,
                 max_tokens=min(role.max_output_tokens, route.spec.max_output),
             )
-        except (QuotaExhausted, ProviderUnavailable) as exc:
+        except ProviderError as exc:
             return Verdict(verdict="needs_human", reasons=[f"критик не отработал: {exc}"])
         self.rt.ledger.record(
             provider=route.spec.provider,

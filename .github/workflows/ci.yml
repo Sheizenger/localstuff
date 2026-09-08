@@ -43,3 +43,61 @@ jobs:
         # Гейт против регрессий самоулучшения: система правит собственные
         # промпты и навыки, ей нужна неподвижная точка отсчёта.
         run: .venv/bin/agentctl eval run
+
+  # Обещание «поставил один раз — подключай везде» ломается тихо: сборка
+  # wheel уже один раз оказалась битой, и заметить это можно было только
+  # реальной установкой. Поэтому путь проверяется целиком, а не тестами.
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AGENTOS_ALLOW_MOCK: "1"
+      AGENTOS_IN_GATE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установить uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Поставить AgentOS глобальным инструментом
+        run: |
+          # --reinstall обязателен: без него uv переиспользует собранный
+          # ранее wheel той же версии, и проверка идёт по старому коду.
+          uv tool install --force --reinstall .
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Подключить к постороннему проекту и прогнать миссию
+        run: |
+          set -euo pipefail
+          project="$(mktemp -d)/foreign-project"
+          mkdir -p "$project" && cd "$project"
+          git init -q .
+          printf 'node_modules/\n' > .gitignore
+          printf '{"mcpServers":{"github":{"command":"npx","args":[]}}}\n' > .mcp.json
+
+          agentctl install
+          agentctl doctor
+          agentctl goal "проверить установку"
+
+          test -f .agentos/var/agentos.db || { echo "состояние не легло в проект"; exit 1; }
+          grep -q '"github"' .mcp.json || { echo "чужой MCP-сервер вытеснен"; exit 1; }
+          grep -q '"agentos"' .mcp.json || { echo "MCP-сервер не зарегистрирован"; exit 1; }
+          grep -q 'alwaysApply: true' .cursor/rules/agentos.mdc \
+            || { echo "правило Cursor без frontmatter"; exit 1; }
+
+      - name: Проверить рукопожатие MCP
+        run: |
+          set -euo pipefail
+          cat > /tmp/probe.py <<'PY'
+          import json
+          import sys
+
+          result = json.load(sys.stdin)["result"]
+          assert result["serverInfo"]["name"] == "agentos", result
+          assert "agentos_resume" in result["instructions"], "контракт не доехал до хоста"
+          print("рукопожатие ok:", result["serverInfo"])
+          PY
+          printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n' \
+            | agentctl mcp | python3 /tmp/probe.py

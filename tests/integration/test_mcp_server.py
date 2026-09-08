@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.mcp_server import INSTRUCTIONS, PROTOCOL_VERSION, AgentOSServer
+from agentos.contract import render_instructions
+from agentos.mcp_server import PROTOCOL_VERSION, AgentOSServer
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ def test_handshake_carries_the_contract(server):
     assert result["protocolVersion"] == PROTOCOL_VERSION
     assert result["serverInfo"]["name"] == "agentos"
     # Контракт уезжает хосту рукопожатием, а не надеждой, что он прочтёт файл.
-    assert result["instructions"] == INSTRUCTIONS
+    assert result["instructions"] == render_instructions()
     assert "agentos_resume" in result["instructions"]
 
 

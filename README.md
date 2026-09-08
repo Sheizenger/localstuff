@@ -14,6 +14,15 @@
 uv tool install agentos          # или: uv tool install .
 ```
 
+Обновление ставится так же, но с `--reinstall`:
+
+```bash
+uv tool install --force --reinstall agentos
+```
+
+Без `--reinstall` uv переиспользует собранный ранее пакет той же версии, и
+обновление молча не доедет.
+
 Дальше в любом проекте:
 
 ```bash
