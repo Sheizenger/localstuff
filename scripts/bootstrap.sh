@@ -17,7 +17,7 @@ else
   "$VENV/bin/python" -m pip install -e ".[$EXTRAS]"
 fi
 
-log "инициализирую состояние в var/"
+log "инициализирую состояние в .agentos/"
 agentctl init
 
 log "синхронизирую описания субагентов для агент-хостов"

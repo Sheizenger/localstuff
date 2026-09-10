@@ -145,3 +145,28 @@ def test_markdown_entrypoints_have_no_frontmatter(project):
     install(project, platforms=("claude",))
 
     assert not (project / "AGENTS.md").read_text(encoding="utf-8").startswith("---")
+
+
+def test_mcp_command_is_portable(project, monkeypatch):
+    """.mcp.json коммитится и уезжает команде: абсолютный путь там бесполезен."""
+    import shutil as _shutil
+
+    monkeypatch.setattr(_shutil, "which", lambda name: "/чья-то/машина/bin/agentctl")
+    install(project, platforms=("claude",))
+
+    entry = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    assert entry["agentos"]["command"] == "agentctl", "путь одной машины не годится"
+
+
+def test_handwritten_full_contract_is_not_duplicated(project):
+    """AGENTS.md с развёрнутым контрактом не должен получать краткий пересказ."""
+    (project / "AGENTS.md").write_text(
+        "# Контракт\n\nagentctl resume --announce\n\nagentctl task report <id>\n",
+        encoding="utf-8",
+    )
+
+    install(project)
+
+    text = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert BEGIN not in text, "полный контракт нельзя дублировать кратким блоком"
+    assert "# Контракт" in text

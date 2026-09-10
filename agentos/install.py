@@ -68,6 +68,16 @@ class InstallReport:
             self.unchanged.append(rel)
 
 
+def _already_full_contract(path: Path) -> bool:
+    """Есть ли в файле развёрнутый контракт, написанный руками."""
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8")
+    if BEGIN in text:
+        return False  # это наш блок, его и обновляем
+    return "agentctl task report" in text and "agentctl resume" in text
+
+
 def _rel(path: Path, root: Path) -> str:
     try:
         return str(path.relative_to(root))
@@ -78,13 +88,13 @@ def _rel(path: Path, root: Path) -> str:
 def server_command() -> list[str]:
     """Чем хост будет запускать MCP-сервер.
 
-    Установленный agentctl предпочтительнее: он не зависит от того, какой
-    python окажется активным в чужом проекте. Если его нет на PATH —
-    честно зовём текущий интерпретатор.
+    Имя без пути, а не результат which: .mcp.json обычно коммитится и
+    уезжает команде, а абсолютный путь с машины того, кто запустил install,
+    у остальных не существует. Если инструмент не установлен — честно зовём
+    текущий интерпретатор, и такой файл коммитить уже не стоит.
     """
-    found = shutil.which("agentctl")
-    if found:
-        return [found, "mcp"]
+    if shutil.which("agentctl"):
+        return ["agentctl", "mcp"]
     return [sys.executable, "-m", "agentos.cli", "mcp"]
 
 
@@ -215,7 +225,13 @@ def install(
 
     # 2. Точки входа. AGENTS.md пишется всегда: его читают Codex, Cursor и
     #    прочие хосты, а также сам человек.
-    entrypoints: list[tuple[Path, str]] = [(root / "AGENTS.md", "Инструкции для агентов")]
+    # AGENTS.md пишется всегда: его читают Codex, Cursor и прочие хосты.
+    # Исключение — репозиторий, где AGENTS.md уже содержит полный контракт
+    # вручную: краткий блок дублировал бы его и ссылался бы сам на себя.
+    entrypoints: list[tuple[Path, str]] = []
+    agents_md = root / "AGENTS.md"
+    if not _already_full_contract(agents_md):
+        entrypoints.append((agents_md, "Инструкции для агентов"))
     if "claude" in platforms:
         entrypoints.append((root / "CLAUDE.md", "CLAUDE.md"))
     if "gemini" in platforms:

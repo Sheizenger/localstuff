@@ -144,3 +144,18 @@ def test_contract_renderings_cannot_drift():
     for invariant in INVARIANTS:
         head = invariant.split(".")[0]
         assert head in markdown and head in instructions, "инвариант потерян в одном из текстов"
+
+
+def test_launch_scripts_do_not_reference_the_old_state_dir():
+    """Состояние переехало в .agentos/var; хук со старым путём молча не работал."""
+    import re
+    from pathlib import Path
+
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    stale = re.compile(r'\$ROOT/var\b|"\$ROOT"/var\b')
+
+    offenders = [
+        path.name for path in scripts.glob("*.sh") if stale.search(path.read_text("utf-8"))
+    ]
+
+    assert not offenders, f"скрипты ссылаются на старый каталог состояния: {offenders}"

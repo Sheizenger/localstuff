@@ -30,9 +30,18 @@ agentos_python() {
   fi
 }
 
+# Готово ли окружение: есть venv или установленный глобально agentctl.
+agentos_available() {
+  [[ -x "$VENV/bin/agentctl" ]] || command -v agentctl >/dev/null 2>&1
+}
+
 # Запустить agentctl любым доступным способом.
 agentctl() {
   load_env
+  if [[ -x "$VENV/bin/agentctl" ]]; then
+    "$VENV/bin/agentctl" "$@"
+    return
+  fi
   local py; py="$(agentos_python)"
   PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" "$py" -m agentos.cli "$@"
 }
