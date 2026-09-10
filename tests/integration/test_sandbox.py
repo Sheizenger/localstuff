@@ -47,9 +47,8 @@ def test_only_project_and_global_memory_are_mounted(argv):
 
 def test_container_gets_no_way_out(argv):
     command = argv("doctor")
-    assert ["--security-opt", "no-new-privileges"] == command[
-        command.index("--security-opt") : command.index("--security-opt") + 2
-    ]
+    at = command.index("--security-opt")
+    assert command[at : at + 2] == ["--security-opt", "no-new-privileges"]
     # Ни привилегий, ни docker-сокета: агенту, который сам решает, что
     # запускать, через них хватило бы одной команды, чтобы выйти наружу.
     assert "--privileged" not in command
