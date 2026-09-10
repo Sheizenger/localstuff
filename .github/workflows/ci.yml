@@ -87,6 +87,24 @@ jobs:
           grep -q 'alwaysApply: true' .cursor/rules/agentos.mdc \
             || { echo "правило Cursor без frontmatter"; exit 1; }
 
+          # Навыки едут в пакете: без чекаута рядом их взять больше неоткуда.
+          agentctl doctor | grep -q 'Навыки: (нет)' \
+            && { echo "навыки не приехали вместе с пакетом"; exit 1; }
+
+          # Гейт из умолчаний в чужом проекте — красная приёмка навсегда.
+          grep -q 'make test' .agentos/config/agentos.yaml \
+            && { echo "гейты взяты из умолчаний, а не из проекта"; exit 1; }
+
+          # Песочница: команда должна собираться и без демона docker.
+          agentctl sandbox --print-command doctor | grep -q -- '--security-opt' \
+            || { echo "песочница запускается без ограничений"; exit 1; }
+
+          # Два мастер-агента в одном проекте не видят миссий друг друга.
+          AGENTOS_AGENT_ID=alpha agentctl goal "первая задача" >/dev/null
+          AGENTOS_AGENT_ID=beta agentctl status --json \
+            | grep -q 'первая задача' \
+            && { echo "чужая миссия видна другому мастер-агенту"; exit 1; }
+
       - name: Проверить рукопожатие MCP
         run: |
           set -euo pipefail
