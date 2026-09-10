@@ -29,7 +29,37 @@ def test_fresh_project_gets_all_entrypoints(project):
     assert (project / ".agentos" / "config" / "agentos.yaml").exists()
     assert (project / ".cursor" / "rules" / "agentos.mdc").exists()
     assert report.created
+    # В проекте без тестовой команды гейтов нет — и об этом сказано вслух.
+    assert report.gates == []
+    assert any("гейты не определились" in w for w in report.warnings)
+
+
+def test_gates_are_taken_from_the_project_not_from_defaults(project):
+    """`make test` в проекте без Makefile — красная приёмка навсегда."""
+    (project / "package.json").write_text(
+        '{"scripts": {"test": "jest", "lint": "eslint ."}}', encoding="utf-8"
+    )
+    report = install(project)
+
+    assert report.gates == ["npm test", "npm run lint"]
+    config = (project / ".agentos" / "config" / "agentos.yaml").read_text(encoding="utf-8")
+    assert "npm test" in config
+    assert "make test" not in config
     assert not report.warnings
+
+
+def test_detected_gates_reach_the_config_that_is_actually_read(project, monkeypatch):
+    """Слой проекта должен переопределять гейты пакета, а не дополнять их."""
+    from agentos.config import Config
+
+    # AGENTOS_HOME увёл бы слой конфигурации в каталог тестов — здесь важно
+    # прочитать именно то, что установка положила в проект.
+    monkeypatch.delenv("AGENTOS_HOME", raising=False)
+    (project / "Makefile").write_text("test:\n\tpytest\n", encoding="utf-8")
+    install(project)
+
+    gates = Config.load(project).get("self_check.programmatic_gates")
+    assert [g["cmd"] for g in gates] == ["make test"]
 
 
 def test_install_is_idempotent(project):

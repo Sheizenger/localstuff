@@ -28,6 +28,7 @@ from .paths import (
     config_layers,
     find_project_root,
     global_home,
+    package_skills,
     project_home,
     project_state,
 )
@@ -336,3 +337,33 @@ class Config:
             self.global_skills_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
+        self.seed_global_skills()
+
+    def seed_global_skills(self) -> list[str]:
+        """Завести навыки из пакета в общий каталог человека.
+
+        Ставится один раз: правки человека не затираются, удалённый им
+        навык не возвращается — маркер помнит, что уже заводилось.
+        Возвращает имена навыков, добавленных этим вызовом.
+        """
+        import shutil
+
+        source = package_skills()
+        if not source.is_dir():
+            return []
+        marker = self.global_skills_dir / ".seeded"
+        seeded = set(
+            marker.read_text(encoding="utf-8").split() if marker.exists() else []
+        )
+        added: list[str] = []
+        for skill in sorted(source.iterdir()):
+            if not skill.is_dir() or skill.name in seeded:
+                continue
+            target = self.global_skills_dir / skill.name
+            if not target.exists():
+                shutil.copytree(skill, target)
+                added.append(skill.name)
+            seeded.add(skill.name)
+        if added or not marker.exists():
+            marker.write_text("\n".join(sorted(seeded)) + "\n", encoding="utf-8")
+        return added

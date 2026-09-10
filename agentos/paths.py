@@ -29,6 +29,18 @@ def package_defaults() -> Path:
     return Path(__file__).resolve().parent / "defaults"
 
 
+def package_skills() -> Path:
+    """Навыки, приехавшие вместе с пакетом.
+
+    В чекауте это skills/ репозитория, в установленном wheel —
+    agentos/defaults/skills. Разные пути, одно содержимое.
+    """
+    inside = package_defaults() / "skills"
+    if inside.is_dir():
+        return inside
+    return Path(__file__).resolve().parent.parent / "skills"
+
+
 def find_project_root(start: Path | str | None = None) -> Path:
     """Найти корень проекта, поднимаясь вверх до первого маркера.
 

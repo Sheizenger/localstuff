@@ -43,6 +43,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["agentos"]
 
+# Навыки едут внутри пакета: без них agentctl в чужом проекте показывает
+# «Навыки: (нет)», а навыки — заявленная часть системы. В репозитории они
+# лежат в skills/, в wheel — в agentos/defaults/skills.
+# Проверяется тестом test_skills_ship_with_the_package.
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "agentos/defaults/skills"
+
 # agentos/defaults лежит внутри пакета и попадает в wheel вместе с ним:
 # без этих файлов установленный глобально agentctl не смог бы работать
 # в чужом проекте. Проверяется тестом test_defaults_ship_with_the_package.

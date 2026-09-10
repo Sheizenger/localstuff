@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from .contract import render_markdown
+from .gates import detect as detect_gates
+from .gates import render_config as render_gates
 from .paths import PROJECT_DIR
 
 BEGIN = "<!-- agentos:begin -->"
@@ -41,10 +43,6 @@ CONFIG_STUB = """# Настройки AgentOS для этого проекта.
 # budget:
 #   mission_tokens: 2000000   # потолок на миссию
 #
-# self_check:
-#   programmatic_gates:       # чем проверяется результат в этом проекте
-#     - name: tests
-#       cmd: "make test"
 """
 
 
@@ -57,6 +55,8 @@ class InstallReport:
     unchanged: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     manual: list[str] = field(default_factory=list)
+    #: Команды, которыми в этом проекте проверяется результат.
+    gates: list[str] = field(default_factory=list)
 
     def note(self, path: Path, root: Path, existed: bool, changed: bool) -> None:
         rel = _rel(path, root)
@@ -215,8 +215,19 @@ def install(
     (home / "var").mkdir(parents=True, exist_ok=True)
     stub = home / "config" / "agentos.yaml"
     if not stub.exists():
-        stub.write_text(CONFIG_STUB, encoding="utf-8")
+        # Гейты определяются по проекту, а не наследуются из умолчаний:
+        # `make test` в проекте без Makefile — это красная приёмка навсегда.
+        found = detect_gates(root)
+        stub.write_text(CONFIG_STUB + "\n" + render_gates(found), encoding="utf-8")
         report.created.append(_rel(stub, root))
+        if found:
+            report.gates = [gate.cmd for gate in found]
+        else:
+            report.warnings.append(
+                "программные гейты не определились — приёмка держится на"
+                " критериях и вердикте. Впишите свои команды в"
+                f" {_rel(stub, root)}"
+            )
     else:
         report.unchanged.append(_rel(stub, root))
 
@@ -306,6 +317,8 @@ def render_report(report: InstallReport, root: Path) -> str:
     ):
         if items:
             lines.append(f"{title}: {', '.join(sorted(items))}")
+    if report.gates:
+        lines.append("гейты приёмки: " + ", ".join(report.gates))
     for warning in report.warnings:
         lines.append(f"⚠ {warning}")
     if report.manual:

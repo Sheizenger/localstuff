@@ -14,7 +14,8 @@ shell:
   allow_binaries: [git, make, python3, python, pytest, ruff, mypy, uv, pip,
                    ls, cat, grep, rg, find, sed, awk, head, tail, wc, sort, uniq, cut, tr,
                    diff, jq, yq, echo, pwd, date, which, env,
-                   mkdir, cp, mv, touch, tee, xargs, node, npm, npx,
+                   mkdir, cp, mv, touch, tee, xargs, node, npm, npx, pnpm, yarn,
+                   cargo, go,
                    "true", "false", "test"]
   deny_patterns:
     - "rm\\s+-rf\\s+/"
