@@ -127,3 +127,10 @@ def test_eval_runs_golden_missions(cli):
     report = json.loads(result.stdout)
     assert report["total"] >= 2
     assert report["passed"] == report["total"], report["cases"]
+
+
+def test_doctor_sees_the_skills_that_are_on_disk(cli):
+    """В свежем проекте навыки уже есть: они едут вместе с пакетом."""
+    cli("init")
+    doctor = cli("doctor")
+    assert "Навыки: (нет)" not in doctor.stdout

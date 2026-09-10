@@ -89,3 +89,16 @@ def test_detected_binaries_are_allowed_by_policy():
     allowed = set(policy["shell"]["allow_binaries"])
     for binary in ("make", "npm", "pnpm", "yarn", "cargo", "go", "pytest", "ruff"):
         assert binary in allowed, binary
+
+
+def test_missing_gate_binary_is_named(monkeypatch, tmp_path):
+    """Гейт, которого нет в PATH, должен быть назван по имени команды."""
+    from agentos.gates import missing_binary
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert missing_binary("pytest -q") == "pytest"
+    assert missing_binary("") == ""
+
+    (tmp_path / "pytest").write_text("#!/bin/sh\n")
+    (tmp_path / "pytest").chmod(0o755)
+    assert missing_binary("pytest -q") == ""

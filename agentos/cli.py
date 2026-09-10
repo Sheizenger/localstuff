@@ -85,6 +85,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Проверка окружения. Возвращает 1, если есть блокирующие проблемы."""
+    from .gates import missing_binary
     from .providers.registry import availability
 
     rt = _runtime(args)
@@ -144,17 +145,30 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
         out("")
         out("Гейты приёмки:")
-        for gate in rt.config.get("self_check.programmatic_gates", []) or []:
+        gates = rt.config.get("self_check.programmatic_gates", []) or []
+        if not gates:
+            out("  (нет) — приёмка держится на критериях и вердикте")
+            warnings.append(
+                "программных гейтов нет: впишите команды проверки в"
+                " .agentos/config/agentos.yaml, иначе «готово» подтверждается"
+                " только вердиктом, а не запуском"
+            )
+        for gate in gates:
             cmd = str(gate.get("cmd", ""))
             verdict = rt.guard.check_shell(cmd)
-            mark = "✓" if verdict.allowed else "✗"
+            binary = missing_binary(cmd)
+            mark = "✓" if verdict.allowed and not binary else "✗"
             out(f"  [{mark}] {gate.get('name')}: {cmd}")
             if not verdict.allowed:
                 problems.append(f"гейт '{gate.get('name')}' запрещён политикой: {verdict.reason}")
-        if not (rt.config.root / ".venv").exists():
-            warnings.append(
-                "нет .venv — гейты 'make test'/'make lint' будут падать. Запусти: make bootstrap"
-            )
+            elif binary:
+                # Гейт, который не запускается, красит приёмку в красный
+                # навсегда: миссия не закроется, сколько бы работы ни сделали.
+                warnings.append(
+                    f"гейт '{gate.get('name')}' не запустится: команды '{binary}'"
+                    f" нет в PATH. Поставьте её или поправьте гейт в"
+                    f" .agentos/config/agentos.yaml"
+                )
 
         out("")
         memory = rt.semantic
@@ -167,6 +181,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     f"бэкенд памяти hindsight настроен, но сервер не отвечает"
                     f" ({memory.mode}): работает локальная память, синтез недоступен"
                 )
+        # Индекс навыков строится из каталогов на диске; без синхронизации
+        # doctor в свежем проекте показал бы «нет» при наличии навыков.
+        rt.sync_skills()
         out(f"Навыки: {rt.skills.stats() or '(нет)'}")
         pending = rt.capabilities.pending()
         if pending:

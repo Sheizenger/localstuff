@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -130,3 +131,16 @@ def render_config(gates: list[Gate]) -> str:
             f"      applies_when: {gate.applies_when}",
         ]
     return "\n".join(lines) + "\n"
+
+
+def missing_binary(cmd: str) -> str:
+    """Имя команды гейта, которой нет в PATH. Пусто — команда на месте.
+
+    Гейт, который не запускается, не «почти работает»: он красит приёмку в
+    красный навсегда, а красный гейт переспорить нельзя.
+    """
+    parts = cmd.split()
+    if not parts:
+        return ""
+    binary = parts[0]
+    return "" if shutil.which(binary) else binary
