@@ -1,15 +1,15 @@
 import SwiftUI
 
-enum AppSection: String, CaseIterable, Identifiable, Hashable {
+public enum AppSection: String, CaseIterable, Identifiable, Hashable {
     case dashboard
     case transactions
     case goals
     case analytics
     case settings
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .dashboard: return "Обзор"
         case .transactions: return "Операции"
@@ -19,7 +19,7 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .dashboard: return "square.grid.2x2"
         case .transactions: return "list.bullet.rectangle"
@@ -29,7 +29,7 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    var subtitle: String {
+    public var subtitle: String {
         switch self {
         case .dashboard: return "Запас месяца и ближайший горизонт"
         case .transactions: return "Доходы, расходы и переводы в цели"
@@ -41,10 +41,12 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
 }
 
 /// Общая шина для меню, горячих клавиш и модальных окон.
-final class UIBus: ObservableObject {
-    @Published var section: AppSection = .dashboard
-    @Published var showAddTransaction: Bool = false
-    @Published var showAddGoal: Bool = false
+public final class UIBus: ObservableObject {
+    @Published public var section: AppSection = .dashboard
+    @Published public var showAddTransaction: Bool = false
+    @Published public var showAddGoal: Bool = false
     /// Цель, для которой открыт диалог пополнения.
-    @Published var contributionTarget: Goal? = nil
+    @Published public var contributionTarget: Goal? = nil
+
+    public init() {}
 }

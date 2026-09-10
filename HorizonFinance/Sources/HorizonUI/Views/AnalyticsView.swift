@@ -1,17 +1,20 @@
 import SwiftUI
 import Charts
+import HorizonCore
 
-struct AnalyticsView: View {
+public struct AnalyticsView: View {
     @EnvironmentObject private var store: Store
 
     @State private var rangeMonths: Int = 12
     @State private var selectedMonth: MonthKey = MonthKey.current
 
+    public init() {}
+
     private var analytics: Analytics { store.analytics }
     private var currency: String { store.currency }
     private var stats: [MonthStats] { analytics.lastStats(rangeMonths) }
 
-    var body: some View {
+    public var body: some View {
         PageScroll {
             rangeBar
             flowChartCard

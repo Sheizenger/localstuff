@@ -2,54 +2,54 @@ import Foundation
 
 /// Прогноз по одной цели: сколько уже есть, сколько идёт в месяц,
 /// когда закроется при текущем темпе и успеваем ли к дедлайну.
-struct GoalForecast: Identifiable, Hashable {
-    var goal: Goal
-    var saved: Double
-    var remaining: Double
-    var progress: Double
+public struct GoalForecast: Identifiable, Hashable {
+    public var goal: Goal
+    public var saved: Double
+    public var remaining: Double
+    public var progress: Double
     /// Сколько денег в месяц достаётся этой цели при текущем распределении.
-    var monthly: Double
+    public var monthly: Double
     /// Через сколько месяцев цель начнёт финансироваться (режим «по очереди»).
-    var startsInMonths: Double
+    public var startsInMonths: Double
     /// Сколько месяцев до закрытия с сегодняшнего дня. nil — при нулевом темпе.
-    var months: Double?
-    var eta: Date?
+    public var months: Double?
+    public var eta: Date?
     /// Сколько нужно откладывать в месяц, чтобы попасть в дедлайн.
-    var requiredMonthly: Double?
+    public var requiredMonthly: Double?
     /// Запас до дедлайна в месяцах: «+» — успеваем, «−» — опаздываем.
-    var deadlineSlack: Double?
+    public var deadlineSlack: Double?
 
-    var id: UUID { goal.id }
-    var isDone: Bool { remaining <= 0.0001 }
-    var isQueued: Bool { !isDone && monthly <= 0 && startsInMonths > 0 }
+    public var id: UUID { goal.id }
+    public var isDone: Bool { remaining <= 0.0001 }
+    public var isQueued: Bool { !isDone && monthly <= 0 && startsInMonths > 0 }
 
-    var deadlineZone: Zone? {
+    public var deadlineZone: Zone? {
         guard let slack = deadlineSlack else { return nil }
         if slack >= 1 { return .safe }
         if slack >= -1 { return .warning }
         return .danger
     }
 
-    var horizonText: String {
+    public var horizonText: String {
         if isDone { return "Цель закрыта" }
         guard let months = months else { return "Темп нулевой — срок не определён" }
         return Fmt.horizon(months: months)
     }
 
-    var etaText: String {
+    public var etaText: String {
         if isDone { return "готово" }
         guard let eta = eta else { return "—" }
         return Fmt.monthFull.string(from: eta)
     }
 }
 
-enum Forecaster {
+public enum Forecaster {
 
     /// Строит прогноз по всем целям исходя из месячного темпа накоплений.
     ///
     /// - `.priority`: весь темп идёт в первую незакрытую цель, следующая стартует после неё.
     /// - `.shares`: каждая цель получает свою долю темпа (доли нормируются, если сумма > 100%).
-    static func build(
+    public static func build(
         goals: [Goal],
         pace: Double,
         mode: FundingMode,
@@ -186,12 +186,12 @@ enum Forecaster {
     }
 
     /// Дробные месяцы → дата. Считаем через дни, чтобы «2.5 месяца» не округлялось до 3.
-    static func dateAfter(months: Double, from: Date) -> Date {
+    public static func dateAfter(months: Double, from: Date) -> Date {
         let days = Int((months * 30.44).rounded())
         return Cal.ru.date(byAdding: .day, value: days, to: from) ?? from
     }
 
-    static func monthsBetween(_ from: Date, _ to: Date) -> Double {
+    public static func monthsBetween(_ from: Date, _ to: Date) -> Double {
         let seconds = to.timeIntervalSince(from)
         return seconds / (30.44 * 24 * 3600)
     }

@@ -2,30 +2,38 @@ import Foundation
 
 // MARK: - Агрегаты по месяцам
 
-struct MonthStats: Identifiable, Hashable {
-    var month: MonthKey
-    var income: Double = 0
-    var essential: Double = 0
-    var flexible: Double = 0
+public struct MonthStats: Identifiable, Hashable {
+    public var month: MonthKey
+    public var income: Double = 0
+    public var essential: Double = 0
+    public var flexible: Double = 0
     /// Сколько за месяц переведено в цели (справочно, на темп не влияет).
-    var moved: Double = 0
+    public var moved: Double = 0
 
-    var id: Int { month.id }
-    var expense: Double { essential + flexible }
+    public var id: Int { month.id }
+    public var expense: Double { essential + flexible }
     /// То, что реально осталось за месяц — база для темпа накоплений.
-    var net: Double { income - expense }
-    var savingsRate: Double { income > 0 ? net / income : 0 }
-    var hasData: Bool { income != 0 || expense != 0 || moved != 0 }
+    public var net: Double { income - expense }
+    public var savingsRate: Double { income > 0 ? net / income : 0 }
+    public var hasData: Bool { income != 0 || expense != 0 || moved != 0 }
+
+    public init(month: MonthKey, income: Double = 0, essential: Double = 0, flexible: Double = 0, moved: Double = 0) {
+        self.month = month
+        self.income = income
+        self.essential = essential
+        self.flexible = flexible
+        self.moved = moved
+    }
 }
 
 // MARK: - Зоны и статус бюджета
 
-enum Zone: String {
+public enum Zone: String {
     case safe
     case warning
     case danger
 
-    var title: String {
+    public var title: String {
         switch self {
         case .safe: return "Зелёная зона"
         case .warning: return "Жёлтая зона"
@@ -34,19 +42,19 @@ enum Zone: String {
     }
 }
 
-struct BudgetStatus {
-    var limit: Double
-    var spent: Double
-    var remaining: Double
-    var projected: Double
-    var monthProgress: Double
-    var daysLeft: Int
-    var dailyAllowance: Double
-    var zone: Zone
-    var headline: String
-    var advice: String
+public struct BudgetStatus {
+    public var limit: Double
+    public var spent: Double
+    public var remaining: Double
+    public var projected: Double
+    public var monthProgress: Double
+    public var daysLeft: Int
+    public var dailyAllowance: Double
+    public var zone: Zone
+    public var headline: String
+    public var advice: String
 
-    var usedShare: Double {
+    public var usedShare: Double {
         guard limit > 0 else { return spent > 0 ? 1 : 0 }
         return (spent / limit).clamped(0, 1.5)
     }
@@ -56,35 +64,35 @@ struct BudgetStatus {
 
 /// Все производные числа считаются здесь, из «сырых» данных.
 /// `today` вынесен параметром, чтобы поведение было воспроизводимым.
-struct Analytics {
-    let data: AppData
-    let today: Date
+public struct Analytics {
+    public let data: AppData
+    public let today: Date
 
-    init(data: AppData, today: Date = Date()) {
+    public init(data: AppData, today: Date = Date()) {
         self.data = data
         self.today = today
     }
 
-    var profile: Profile { data.profile }
-    var currency: String { data.profile.currencyCode }
-    var currentMonth: MonthKey { MonthKey(date: today) }
+    public var profile: Profile { data.profile }
+    public var currency: String { data.profile.currencyCode }
+    public var currentMonth: MonthKey { MonthKey(date: today) }
 
-    var categoryByID: [UUID: Category] {
+    public var categoryByID: [UUID: Category] {
         var map: [UUID: Category] = [:]
         for c in data.categories { map[c.id] = c }
         return map
     }
 
-    func category(for txn: Txn) -> Category? {
+    public func category(for txn: Txn) -> Category? {
         guard let id = txn.categoryID else { return nil }
         return categoryByID[id]
     }
 
-    func kind(of txn: Txn) -> SpendKind {
+    public func kind(of txn: Txn) -> SpendKind {
         category(for: txn)?.kind ?? .flexible
     }
 
-    var activeGoals: [Goal] {
+    public var activeGoals: [Goal] {
         data.goals.filter { !$0.isArchived }.sorted { lhs, rhs in
             if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
             return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
@@ -94,7 +102,7 @@ struct Analytics {
     // MARK: Помесячная статистика
 
     /// Непрерывный ряд месяцев от самой ранней операции (но не короче 12 месяцев) до текущего.
-    var monthlyStats: [MonthStats] {
+    public var monthlyStats: [MonthStats] {
         var buckets: [Int: MonthStats] = [:]
 
         func bucket(_ key: MonthKey) -> MonthStats {
@@ -147,18 +155,18 @@ struct Analytics {
     }
 
     /// Только завершённые месяцы — текущий ещё не показателен.
-    var completedMonths: [MonthStats] {
+    public var completedMonths: [MonthStats] {
         let now = currentMonth
         return monthlyStats.filter { $0.month < now }
     }
 
-    func stats(for month: MonthKey) -> MonthStats {
+    public func stats(for month: MonthKey) -> MonthStats {
         monthlyStats.first(where: { $0.month == month }) ?? MonthStats(month: month)
     }
 
-    var thisMonth: MonthStats { stats(for: currentMonth) }
+    public var thisMonth: MonthStats { stats(for: currentMonth) }
 
-    func lastStats(_ count: Int) -> [MonthStats] {
+    public func lastStats(_ count: Int) -> [MonthStats] {
         let all = monthlyStats
         guard all.count > count else { return all }
         return Array(all.suffix(count))
@@ -166,15 +174,15 @@ struct Analytics {
 
     // MARK: Темп накоплений
 
-    struct PaceInfo {
-        var value: Double
-        var basis: String
-        var monthsUsed: Int
+    public struct PaceInfo {
+        public var value: Double
+        public var basis: String
+        public var monthsUsed: Int
         /// true — реальных данных не хватило, взят план из настроек.
-        var isPlanned: Bool
+        public var isPlanned: Bool
     }
 
-    var pace: PaceInfo {
+    public var pace: PaceInfo {
         let mode = profile.paceMode
         if mode == .manual {
             return PaceInfo(value: profile.manualPace, basis: "задан вручную", monthsUsed: 0, isPlanned: false)
@@ -213,7 +221,7 @@ struct Analytics {
     }
 
     /// Плановый темп из настроек — запасной вариант, пока нет истории.
-    var plannedPace: Double {
+    public var plannedPace: Double {
         let byPlan = profile.plannedIncome - profile.essentialsPlan - profile.flexibleLimit
         if byPlan > 0 { return byPlan }
         return max(profile.savingsPlan, 0)
@@ -228,34 +236,34 @@ struct Analytics {
     // MARK: Деньги
 
     /// Сколько уже лежит в конкретной цели.
-    func saved(for goal: Goal) -> Double {
+    public func saved(for goal: Goal) -> Double {
         let moved = data.contributions.filter { $0.goalID == goal.id }.reduce(0.0) { $0 + $1.amount }
         return goal.startingAmount + moved
     }
 
-    var totalInGoals: Double {
+    public var totalInGoals: Double {
         data.goals.filter { !$0.isArchived }.reduce(0.0) { $0 + saved(for: $1) }
     }
 
     /// Свободные деньги: всё, что не разложено по целям.
-    var freeCash: Double {
+    public var freeCash: Double {
         let flows = data.transactions.reduce(0.0) { $0 + $1.signedAmount }
         let moved = data.contributions.reduce(0.0) { $0 + $1.amount }
         return profile.openingBalance + flows - moved
     }
 
     /// Общий капитал: свободные деньги плюс всё, что в целях.
-    var totalCapital: Double { freeCash + totalInGoals }
+    public var totalCapital: Double { freeCash + totalInGoals }
 
     /// Средние обязательные расходы в месяц — база для «на сколько месяцев хватит».
-    var averageEssentials: Double {
+    public var averageEssentials: Double {
         let history = completedMonths.filter { $0.hasData }.suffix(6)
         if history.isEmpty { return max(profile.essentialsPlan, 0) }
         let sum = history.reduce(0.0) { $0 + $1.essential }
         return sum / Double(history.count)
     }
 
-    var averageBurn: Double {
+    public var averageBurn: Double {
         let history = completedMonths.filter { $0.hasData }.suffix(6)
         if history.isEmpty { return max(profile.essentialsPlan + profile.flexibleLimit, 0) }
         let sum = history.reduce(0.0) { $0 + $1.expense }
@@ -263,7 +271,7 @@ struct Analytics {
     }
 
     /// На сколько месяцев жизни хватит всех накоплений при текущих тратах.
-    var runwayMonths: Double {
+    public var runwayMonths: Double {
         let burn = averageBurn
         guard burn > 0 else { return 0 }
         return max(totalCapital, 0) / burn
@@ -271,7 +279,7 @@ struct Analytics {
 
     // MARK: Красная зона текущего месяца
 
-    var budgetStatus: BudgetStatus {
+    public var budgetStatus: BudgetStatus {
         let month = currentMonth
         let limit = max(profile.flexibleLimit, 0)
         let spent = thisMonth.flexible
@@ -337,15 +345,15 @@ struct Analytics {
 
     // MARK: Капитал во времени
 
-    struct CapitalPoint: Identifiable, Hashable {
-        var month: MonthKey
-        var value: Double
-        var isForecast: Bool
-        var id: Int { month.id }
+    public struct CapitalPoint: Identifiable, Hashable {
+        public var month: MonthKey
+        public var value: Double
+        public var isForecast: Bool
+        public var id: Int { month.id }
     }
 
     /// Фактическая кривая капитала по месяцам.
-    func capitalHistory(months: Int = 12) -> [CapitalPoint] {
+    public func capitalHistory(months: Int = 12) -> [CapitalPoint] {
         let all = monthlyStats
         guard !all.isEmpty else { return [] }
 
@@ -362,7 +370,7 @@ struct Analytics {
 
     /// Продолжение кривой вперёд по текущему темпу. Начинается с последней фактической точки,
     /// чтобы линия прогноза стыковалась с фактом без разрыва.
-    func capitalForecast(months: Int = 12) -> [CapitalPoint] {
+    public func capitalForecast(months: Int = 12) -> [CapitalPoint] {
         let history = capitalHistory(months: 1)
         let startValue = history.last?.value ?? totalCapital
         let startMonth = history.last?.month ?? currentMonth
@@ -379,18 +387,18 @@ struct Analytics {
 
     // MARK: Категории
 
-    struct CategorySlice: Identifiable, Hashable {
-        var categoryID: UUID?
-        var name: String
-        var emoji: String
-        var kind: SpendKind
-        var amount: Double
-        var share: Double
-        var id: String { categoryID?.uuidString ?? "none" }
+    public struct CategorySlice: Identifiable, Hashable {
+        public var categoryID: UUID?
+        public var name: String
+        public var emoji: String
+        public var kind: SpendKind
+        public var amount: Double
+        public var share: Double
+        public var id: String { categoryID?.uuidString ?? "none" }
     }
 
     /// Разбивка расходов месяца по категориям, от большего к меньшему.
-    func expenseBreakdown(month: MonthKey) -> [CategorySlice] {
+    public func expenseBreakdown(month: MonthKey) -> [CategorySlice] {
         let txns = data.transactions.filter { $0.flow == .expense && MonthKey(date: $0.date) == month }
         guard !txns.isEmpty else { return [] }
 

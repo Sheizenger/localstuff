@@ -1,19 +1,51 @@
 import SwiftUI
-import AppKit
 import UniformTypeIdentifiers
+import HorizonCore
+#if os(macOS)
+import AppKit
+#endif
 
-struct SettingsView: View {
+/// Файл экспорта — обычный JSON, обёрнутый в `FileDocument`, чтобы `.fileExporter`
+/// работал одинаково на macOS и iOS (никаких `NSSavePanel`/`NSOpenPanel`).
+public struct HorizonJSONDocument: FileDocument {
+    public static var readableContentTypes: [UTType] { [.json] }
+
+    public var data: Data
+
+    public init(data: Data) {
+        self.data = data
+    }
+
+    public init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.data = data
+    }
+
+    public func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+public struct SettingsView: View {
     @EnvironmentObject private var store: Store
 
     @State private var confirmReset = false
     @State private var confirmDemo = false
     @State private var message: String? = nil
 
+    @State private var exportDocument: HorizonJSONDocument? = nil
+    @State private var showExporter = false
+    @State private var showImporter = false
+
     private let currencies = ["EUR", "USD", "RUB", "GBP", "PLN", "GEL", "TRY", "RSD"]
+
+    public init() {}
 
     private var profile: Binding<Profile> { $store.data.profile }
 
-    var body: some View {
+    public var body: some View {
         PageScroll {
             moneyCard
             planCard
@@ -32,6 +64,27 @@ struct SettingsView: View {
             Button("Загрузить демо", role: .destructive) { store.loadDemoData() }
         } message: {
             Text("Текущие операции и цели будут заменены семью месяцами вымышленной истории. Сделайте экспорт, если данные важны.")
+        }
+        .fileExporter(
+            isPresented: $showExporter,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: "horizon-backup"
+        ) { result in
+            switch result {
+            case .success(let url):
+                message = "Экспорт сохранён: \(url.lastPathComponent)"
+            case .failure:
+                message = nil
+            }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url):
+                importData(from: url)
+            case .failure:
+                message = nil
+            }
         }
     }
 
@@ -221,7 +274,7 @@ struct SettingsView: View {
 
     private var dataCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionTitle(title: "Данные", subtitle: "всё лежит на вашем компьютере, в обычном JSON")
+            SectionTitle(title: "Данные", subtitle: "всё лежит на вашем устройстве, в обычном JSON")
 
             KeyValueRow(key: "Файл", value: Persistence.fileURL.path)
             if let saved = store.lastSavedAt {
@@ -239,12 +292,14 @@ struct SettingsView: View {
             }
 
             HStack(spacing: 10) {
+                #if os(macOS)
                 Button("Показать в Finder") {
                     store.saveNow()
                     NSWorkspace.shared.activateFileViewerSelecting([Persistence.fileURL])
                 }
+                #endif
                 Button("Экспорт…") { exportData() }
-                Button("Импорт…") { importData() }
+                Button("Импорт…") { showImporter = true }
                 Spacer()
                 Button("Демо-данные") { confirmDemo = true }
                 Button("Сбросить всё", role: .destructive) { confirmReset = true }
@@ -261,32 +316,24 @@ struct SettingsView: View {
     }
 
     private func exportData() {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "horizon-backup.json"
-        panel.allowedContentTypes = [.json]
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try Persistence.export(store.data, to: url)
-            message = "Экспорт сохранён: \(url.lastPathComponent)"
+            let raw = try Persistence.makeEncoder().encode(store.data)
+            exportDocument = HorizonJSONDocument(data: raw)
+            showExporter = true
         } catch {
             message = nil
-            NSSound.beep()
         }
     }
 
-    private func importData() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+    private func importData(from url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         do {
             let imported = try Persistence.importData(from: url)
             store.replace(with: imported)
             message = "Данные загружены из \(url.lastPathComponent)"
         } catch {
             message = nil
-            NSSound.beep()
         }
     }
 }

@@ -1,13 +1,20 @@
 import SwiftUI
+import HorizonCore
 
 // MARK: - Заголовок секции
 
-struct SectionTitle: View {
-    var title: String
-    var subtitle: String? = nil
-    var systemImage: String? = nil
+public struct SectionTitle: View {
+    public var title: String
+    public var subtitle: String? = nil
+    public var systemImage: String? = nil
 
-    var body: some View {
+    public init(title: String, subtitle: String? = nil, systemImage: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+    }
+
+    public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if let systemImage = systemImage {
                 Image(systemName: systemImage)
@@ -29,14 +36,22 @@ struct SectionTitle: View {
 
 // MARK: - Плитка с числом
 
-struct StatTile: View {
-    var icon: String
-    var title: String
-    var value: String
-    var caption: String? = nil
-    var tint: Color = Palette.accent
+public struct StatTile: View {
+    public var icon: String
+    public var title: String
+    public var value: String
+    public var caption: String? = nil
+    public var tint: Color = Palette.accent
 
-    var body: some View {
+    public init(icon: String, title: String, value: String, caption: String? = nil, tint: Color = Palette.accent) {
+        self.icon = icon
+        self.title = title
+        self.value = value
+        self.caption = caption
+        self.tint = tint
+    }
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
@@ -76,15 +91,31 @@ struct StatTile: View {
 
 // MARK: - Кольцо прогресса
 
-struct ProgressRing: View {
-    var progress: Double
-    var color: Color
-    var lineWidth: CGFloat = 10
-    var size: CGFloat = 92
-    var centerTop: String
-    var centerBottom: String? = nil
+public struct ProgressRing: View {
+    public var progress: Double
+    public var color: Color
+    public var lineWidth: CGFloat = 10
+    public var size: CGFloat = 92
+    public var centerTop: String
+    public var centerBottom: String? = nil
 
-    var body: some View {
+    public init(
+        progress: Double,
+        color: Color,
+        lineWidth: CGFloat = 10,
+        size: CGFloat = 92,
+        centerTop: String,
+        centerBottom: String? = nil
+    ) {
+        self.progress = progress
+        self.color = color
+        self.lineWidth = lineWidth
+        self.size = size
+        self.centerTop = centerTop
+        self.centerBottom = centerBottom
+    }
+
+    public var body: some View {
         ZStack {
             Circle()
                 .stroke(color.opacity(0.16), lineWidth: lineWidth)
@@ -112,13 +143,21 @@ struct ProgressRing: View {
 
 // MARK: - Полоса лимита с отметкой прогноза
 
-struct MeterBar: View {
-    var value: Double
-    var limit: Double
-    var zone: Zone
+public struct MeterBar: View {
+    public var value: Double
+    public var limit: Double
+    public var zone: Zone
     /// Прогноз на конец месяца — рисуется отдельной риской.
-    var projection: Double? = nil
-    var height: CGFloat = 14
+    public var projection: Double? = nil
+    public var height: CGFloat = 14
+
+    public init(value: Double, limit: Double, zone: Zone, projection: Double? = nil, height: CGFloat = 14) {
+        self.value = value
+        self.limit = limit
+        self.zone = zone
+        self.projection = projection
+        self.height = height
+    }
 
     private var fill: Double {
         guard limit > 0 else { return value > 0 ? 1 : 0 }
@@ -130,7 +169,7 @@ struct MeterBar: View {
         return (projection / limit).clamped(0, 1)
     }
 
-    var body: some View {
+    public var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule()
@@ -160,11 +199,16 @@ struct MeterBar: View {
 
 // MARK: - Бейдж зоны
 
-struct ZoneBadge: View {
-    var zone: Zone
-    var text: String? = nil
+public struct ZoneBadge: View {
+    public var zone: Zone
+    public var text: String? = nil
 
-    var body: some View {
+    public init(zone: Zone, text: String? = nil) {
+        self.zone = zone
+        self.text = text
+    }
+
+    public var body: some View {
         HStack(spacing: 5) {
             Image(systemName: zone.icon)
                 .font(.system(size: 10, weight: .bold))
@@ -180,17 +224,24 @@ struct ZoneBadge: View {
 
 // MARK: - Мини-столбики
 
-struct MiniBars: View {
-    var values: [Double]
-    var labels: [String]
-    var positiveColor: Color = Palette.green
-    var negativeColor: Color = Palette.red
+public struct MiniBars: View {
+    public var values: [Double]
+    public var labels: [String]
+    public var positiveColor: Color = Palette.green
+    public var negativeColor: Color = Palette.red
+
+    public init(values: [Double], labels: [String], positiveColor: Color = Palette.green, negativeColor: Color = Palette.red) {
+        self.values = values
+        self.labels = labels
+        self.positiveColor = positiveColor
+        self.negativeColor = negativeColor
+    }
 
     private var maxAbs: Double {
         max(values.map { abs($0) }.max() ?? 1, 1)
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
             ForEach(Array(values.enumerated()), id: \.offset) { index, value in
                 VStack(spacing: 5) {
@@ -212,14 +263,28 @@ struct MiniBars: View {
 
 // MARK: - Пустое состояние
 
-struct EmptyState: View {
-    var icon: String
-    var title: String
-    var message: String
-    var actionTitle: String? = nil
-    var action: (() -> Void)? = nil
+public struct EmptyState: View {
+    public var icon: String
+    public var title: String
+    public var message: String
+    public var actionTitle: String? = nil
+    public var action: (() -> Void)? = nil
 
-    var body: some View {
+    public init(
+        icon: String,
+        title: String,
+        message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
+        self.icon = icon
+        self.title = title
+        self.message = message
+        self.actionTitle = actionTitle
+        self.action = action
+    }
+
+    public var body: some View {
         VStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 34, weight: .light))
@@ -244,13 +309,20 @@ struct EmptyState: View {
 
 // MARK: - Строка «ключ — значение»
 
-struct KeyValueRow: View {
-    var key: String
-    var value: String
-    var valueColor: Color = Palette.ink
-    var bold: Bool = false
+public struct KeyValueRow: View {
+    public var key: String
+    public var value: String
+    public var valueColor: Color = Palette.ink
+    public var bold: Bool = false
 
-    var body: some View {
+    public init(key: String, value: String, valueColor: Color = Palette.ink, bold: Bool = false) {
+        self.key = key
+        self.value = value
+        self.valueColor = valueColor
+        self.bold = bold
+    }
+
+    public var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(key)
                 .font(.subheadline)
@@ -265,12 +337,18 @@ struct KeyValueRow: View {
 
 // MARK: - Поле для суммы
 
-struct AmountField: View {
-    var title: String
-    @Binding var value: Double
-    var currency: String
+public struct AmountField: View {
+    public var title: String
+    @Binding public var value: Double
+    public var currency: String
 
-    var body: some View {
+    public init(title: String, value: Binding<Double>, currency: String) {
+        self.title = title
+        self._value = value
+        self.currency = currency
+    }
+
+    public var body: some View {
         HStack {
             TextField(title, value: $value, format: .number.precision(.fractionLength(0...2)))
                 .textFieldStyle(.roundedBorder)

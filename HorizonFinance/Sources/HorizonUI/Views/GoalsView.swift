@@ -1,16 +1,19 @@
 import SwiftUI
 import Charts
+import HorizonCore
 
-struct GoalsView: View {
+public struct GoalsView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var bus: UIBus
 
     @State private var editingGoal: Goal? = nil
 
+    public init() {}
+
     private var currency: String { store.currency }
     private var forecasts: [GoalForecast] { store.forecasts }
 
-    var body: some View {
+    public var body: some View {
         PageScroll {
             planCard
             if forecasts.isEmpty {
@@ -179,17 +182,33 @@ struct GoalsView: View {
 
 // MARK: - Карточка цели
 
-struct GoalCard: View {
-    var forecast: GoalForecast
-    var currency: String
-    var onEdit: () -> Void
-    var onTopUp: () -> Void
-    var onMoveUp: () -> Void
-    var onMoveDown: () -> Void
+public struct GoalCard: View {
+    public var forecast: GoalForecast
+    public var currency: String
+    public var onEdit: () -> Void
+    public var onTopUp: () -> Void
+    public var onMoveUp: () -> Void
+    public var onMoveDown: () -> Void
+
+    public init(
+        forecast: GoalForecast,
+        currency: String,
+        onEdit: @escaping () -> Void,
+        onTopUp: @escaping () -> Void,
+        onMoveUp: @escaping () -> Void,
+        onMoveDown: @escaping () -> Void
+    ) {
+        self.forecast = forecast
+        self.currency = currency
+        self.onEdit = onEdit
+        self.onTopUp = onTopUp
+        self.onMoveUp = onMoveUp
+        self.onMoveDown = onMoveDown
+    }
 
     private var color: Color { Color(hex: forecast.goal.colorHex) }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             progressBlock

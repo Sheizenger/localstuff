@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import HorizonCore
 
 @main
 struct HorizonApp: App {

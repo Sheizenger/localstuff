@@ -1,13 +1,16 @@
 import SwiftUI
+import HorizonCore
 
-struct DashboardView: View {
+public struct DashboardView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var bus: UIBus
+
+    public init() {}
 
     private var analytics: Analytics { store.analytics }
     private var currency: String { store.currency }
 
-    var body: some View {
+    public var body: some View {
         PageScroll {
             if store.data.transactions.isEmpty {
                 onboardingCard
@@ -261,11 +264,16 @@ struct DashboardView: View {
 }
 
 /// Строка цели на «Обзоре»: прогресс, срок и месячный взнос.
-struct GoalHorizonRow: View {
-    var forecast: GoalForecast
-    var currency: String
+public struct GoalHorizonRow: View {
+    public var forecast: GoalForecast
+    public var currency: String
 
-    var body: some View {
+    public init(forecast: GoalForecast, currency: String) {
+        self.forecast = forecast
+        self.currency = currency
+    }
+
+    public var body: some View {
         HStack(spacing: 14) {
             ProgressRing(
                 progress: forecast.progress,

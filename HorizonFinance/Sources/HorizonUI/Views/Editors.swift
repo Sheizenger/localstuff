@@ -1,9 +1,10 @@
 import SwiftUI
+import HorizonCore
 
 // MARK: - Операция
 
-struct TransactionEditor: View {
-    enum Mode {
+public struct TransactionEditor: View {
+    public enum Mode {
         case create
         case edit(Txn)
     }
@@ -12,6 +13,10 @@ struct TransactionEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     var mode: Mode
+
+    public init(mode: Mode) {
+        self.mode = mode
+    }
 
     @State private var draft = Txn()
     @State private var loaded = false
@@ -23,7 +28,7 @@ struct TransactionEditor: View {
 
     private var categories: [Category] { store.categories(for: draft.flow) }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
@@ -123,8 +128,8 @@ struct TransactionEditor: View {
 
 // MARK: - Цель
 
-struct GoalEditor: View {
-    enum Mode {
+public struct GoalEditor: View {
+    public enum Mode {
         case create
         case edit(Goal)
     }
@@ -133,6 +138,10 @@ struct GoalEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     var mode: Mode
+
+    public init(mode: Mode) {
+        self.mode = mode
+    }
 
     @State private var draft = Goal()
     @State private var hasDeadline = false
@@ -147,7 +156,7 @@ struct GoalEditor: View {
         return false
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(isEditing ? "Изменить цель" : "Новая цель")
@@ -298,11 +307,15 @@ struct GoalEditor: View {
 
 // MARK: - Пополнение цели
 
-struct ContributionEditor: View {
+public struct ContributionEditor: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
 
     var goal: Goal
+
+    public init(goal: Goal) {
+        self.goal = goal
+    }
 
     @State private var amount: Double = 0
     @State private var date = Date()
@@ -312,7 +325,7 @@ struct ContributionEditor: View {
     private var saved: Double { store.analytics.saved(for: goal) }
     private var remaining: Double { max(goal.targetAmount - saved, 0) }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Text(goal.emoji)

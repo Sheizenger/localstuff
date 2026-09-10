@@ -1,4 +1,6 @@
 import SwiftUI
+import HorizonCore
+import HorizonUI
 
 struct RootView: View {
     @EnvironmentObject private var store: Store
@@ -110,39 +112,5 @@ struct RootView: View {
             }
             .help("Добавить доход или расход (⌘N)")
         }
-    }
-}
-
-/// Общая обёртка страницы: заголовок, отступы, прокрутка.
-struct PageScroll<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Metrics.gap) {
-                content
-            }
-            .padding(20)
-            .frame(maxWidth: 1180, alignment: .leading)
-            .frame(maxWidth: .infinity)
-        }
-        .background(BackgroundWash())
-    }
-}
-
-/// Мягкая подложка, чтобы карточки читались как слои, а не как плоский список.
-struct BackgroundWash: View {
-    var body: some View {
-        LinearGradient(
-            colors: [
-                Palette.accent.opacity(0.10),
-                Color.clear,
-                Palette.violet.opacity(0.07)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
-        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
     }
 }

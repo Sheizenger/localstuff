@@ -1,6 +1,7 @@
 import SwiftUI
+import HorizonCore
 
-struct TransactionsView: View {
+public struct TransactionsView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var bus: UIBus
 
@@ -21,9 +22,11 @@ struct TransactionsView: View {
     @State private var query: String = ""
     @State private var editingTxn: Txn? = nil
 
+    public init() {}
+
     private var currency: String { store.currency }
 
-    var body: some View {
+    public var body: some View {
         PageScroll {
             monthBar
             summaryStrip
@@ -248,12 +251,18 @@ struct TransactionsView: View {
     }
 }
 
-struct TransactionRow: View {
-    var txn: Txn
-    var currency: String
-    var category: Category?
+public struct TransactionRow: View {
+    public var txn: Txn
+    public var currency: String
+    public var category: Category?
 
-    var body: some View {
+    public init(txn: Txn, currency: String, category: Category?) {
+        self.txn = txn
+        self.currency = currency
+        self.category = category
+    }
+
+    public var body: some View {
         HStack(spacing: 12) {
             Text(category?.emoji ?? "•")
                 .font(.title3)

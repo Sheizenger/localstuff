@@ -2,19 +2,19 @@ import Foundation
 import SwiftUI
 
 /// Единственный источник правды. Хранит данные, отдаёт аналитику и сам пишет файл на диск.
-final class Store: ObservableObject {
+public final class Store: ObservableObject {
 
-    @Published var data: AppData {
+    @Published public var data: AppData {
         didSet { scheduleSave() }
     }
 
     /// Отметка последнего сохранения — показывается в настройках.
-    @Published private(set) var lastSavedAt: Date? = nil
-    @Published private(set) var saveError: String? = nil
+    @Published public private(set) var lastSavedAt: Date? = nil
+    @Published public private(set) var saveError: String? = nil
 
     private var saveWork: DispatchWorkItem? = nil
 
-    init(data: AppData? = nil) {
+    public init(data: AppData? = nil) {
         if let data = data {
             self.data = data
         } else if let loaded = Persistence.load() {
@@ -26,11 +26,11 @@ final class Store: ObservableObject {
 
     // MARK: Аналитика
 
-    var analytics: Analytics { Analytics(data: data) }
+    public var analytics: Analytics { Analytics(data: data) }
 
-    var currency: String { data.profile.currencyCode }
+    public var currency: String { data.profile.currencyCode }
 
-    var forecasts: [GoalForecast] {
+    public var forecasts: [GoalForecast] {
         let a = analytics
         return Forecaster.build(
             goals: a.activeGoals,
@@ -40,7 +40,7 @@ final class Store: ObservableObject {
         )
     }
 
-    func forecast(for goal: Goal) -> GoalForecast? {
+    public func forecast(for goal: Goal) -> GoalForecast? {
         forecasts.first(where: { $0.goal.id == goal.id })
     }
 
@@ -65,7 +65,7 @@ final class Store: ObservableObject {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
-    func saveNow() {
+    public func saveNow() {
         saveWork?.cancel()
         let ok = Persistence.save(data)
         if ok {
@@ -78,28 +78,28 @@ final class Store: ObservableObject {
 
     // MARK: Операции
 
-    func addTransaction(_ txn: Txn) {
+    public func addTransaction(_ txn: Txn) {
         data.transactions.append(txn)
         data.transactions.sort { $0.date > $1.date }
     }
 
-    func updateTransaction(_ txn: Txn) {
+    public func updateTransaction(_ txn: Txn) {
         guard let index = data.transactions.firstIndex(where: { $0.id == txn.id }) else { return }
         data.transactions[index] = txn
         data.transactions.sort { $0.date > $1.date }
     }
 
-    func deleteTransaction(_ txn: Txn) {
+    public func deleteTransaction(_ txn: Txn) {
         data.transactions.removeAll { $0.id == txn.id }
     }
 
-    func deleteTransactions(ids: Set<UUID>) {
+    public func deleteTransactions(ids: Set<UUID>) {
         data.transactions.removeAll { ids.contains($0.id) }
     }
 
     // MARK: Цели
 
-    func addGoal(_ goal: Goal) {
+    public func addGoal(_ goal: Goal) {
         var goal = goal
         if goal.priority == 0 {
             goal.priority = (data.goals.map { $0.priority }.max() ?? -1) + 1
@@ -107,17 +107,17 @@ final class Store: ObservableObject {
         data.goals.append(goal)
     }
 
-    func updateGoal(_ goal: Goal) {
+    public func updateGoal(_ goal: Goal) {
         guard let index = data.goals.firstIndex(where: { $0.id == goal.id }) else { return }
         data.goals[index] = goal
     }
 
-    func deleteGoal(_ goal: Goal) {
+    public func deleteGoal(_ goal: Goal) {
         data.goals.removeAll { $0.id == goal.id }
         data.contributions.removeAll { $0.goalID == goal.id }
     }
 
-    func moveGoal(_ goal: Goal, up: Bool) {
+    public func moveGoal(_ goal: Goal, up: Bool) {
         var ordered = analytics.activeGoals
         guard let index = ordered.firstIndex(where: { $0.id == goal.id }) else { return }
         let target = up ? index - 1 : index + 1
@@ -132,31 +132,31 @@ final class Store: ObservableObject {
 
     // MARK: Пополнения целей
 
-    func addContribution(_ contribution: Contribution) {
+    public func addContribution(_ contribution: Contribution) {
         data.contributions.append(contribution)
         data.contributions.sort { $0.date > $1.date }
     }
 
-    func deleteContribution(_ contribution: Contribution) {
+    public func deleteContribution(_ contribution: Contribution) {
         data.contributions.removeAll { $0.id == contribution.id }
     }
 
-    func contributions(for goal: Goal) -> [Contribution] {
+    public func contributions(for goal: Goal) -> [Contribution] {
         data.contributions.filter { $0.goalID == goal.id }.sorted { $0.date > $1.date }
     }
 
     // MARK: Категории
 
-    func addCategory(_ category: Category) {
+    public func addCategory(_ category: Category) {
         data.categories.append(category)
     }
 
-    func updateCategory(_ category: Category) {
+    public func updateCategory(_ category: Category) {
         guard let index = data.categories.firstIndex(where: { $0.id == category.id }) else { return }
         data.categories[index] = category
     }
 
-    func deleteCategory(_ category: Category) {
+    public func deleteCategory(_ category: Category) {
         // Операции не удаляем — просто теряют категорию и считаются свободными тратами.
         data.categories.removeAll { $0.id == category.id }
         for index in data.transactions.indices where data.transactions[index].categoryID == category.id {
@@ -164,23 +164,23 @@ final class Store: ObservableObject {
         }
     }
 
-    func categories(for flow: MoneyFlow) -> [Category] {
+    public func categories(for flow: MoneyFlow) -> [Category] {
         data.categories.filter { $0.flow == flow && !$0.isArchived }
     }
 
     // MARK: Данные целиком
 
-    func loadDemoData() {
+    public func loadDemoData() {
         data = AppData.demo()
         saveNow()
     }
 
-    func resetAll() {
+    public func resetAll() {
         data = AppData.starter()
         saveNow()
     }
 
-    func replace(with newData: AppData) {
+    public func replace(with newData: AppData) {
         data = newData
         saveNow()
     }
