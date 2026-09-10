@@ -105,12 +105,28 @@ HEADER = (
     " исчерпания лимитов токенов."
 )
 
+#: Как уживаются несколько мастер-агентов в одном проекте.
+MULTI_AGENT_CLI = (
+    "Мастер-агентов в проекте может быть несколько — по чату на задачу."
+    " Назовись своим ID (`export AGENTOS_AGENT_ID=<имя>` или флаг `--agent"
+    " <имя>` у любой команды), и ты будешь вести только свои миссии."
+    " Без этого все чаты работают под общим агентом `default` и подхватывают"
+    " работу друг друга. Чужие миссии видно через `agentctl status --all`."
+)
+MULTI_AGENT_MCP = (
+    "Мастер-агентов в проекте может быть несколько — по чату на задачу."
+    " Передавай своё имя в поле `agent` у `agentos_resume`, `agentos_goal` и"
+    " `agentos_status`, и ты будешь вести только свои миссии. Без этого все"
+    " чаты работают под общим агентом `default` и подхватывают работу друг друга."
+)
+
 
 def render_markdown() -> str:
     """Текст для файлов-инструкций: AGENTS.md, CLAUDE.md, GEMINI.md."""
     lines = ["## AgentOS", "", HEADER, ""]
     for rule in RULES:
         lines += [f"**{rule.when}:**", "", "```bash", rule.cli, "```", "", rule.why, ""]
+    lines += ["**Несколько задач параллельно:**", "", MULTI_AGENT_CLI, ""]
     lines += ["**Чего нельзя делать:**", ""]
     lines += [f"- {item}" for item in INVARIANTS]
     lines += [
@@ -134,7 +150,7 @@ def render_instructions() -> str:
     ]
     for index, rule in enumerate(RULES, start=1):
         lines.append(f"{index}. {rule.when} — `{rule.tool}`. {rule.why}")
-    lines += ["", "Чего нельзя делать:", ""]
+    lines += ["", MULTI_AGENT_MCP, "", "Чего нельзя делать:", ""]
     lines += [f"- {item}" for item in INVARIANTS]
     return "\n".join(lines)
 

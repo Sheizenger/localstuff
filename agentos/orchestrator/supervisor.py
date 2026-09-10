@@ -165,16 +165,24 @@ class Supervisor:
         improver.retro(mission_id)
 
     # ------------------------------------------------------------- resume
-    def resume(self, *, once: bool = False) -> tuple[int, list[AdvanceResult]]:
-        """Подхватить всё незавершённое. Возвращает код выхода и отчёты.
+    def resume(
+        self, *, once: bool = False, all_agents: bool = False
+    ) -> tuple[int, list[AdvanceResult]]:
+        """Подхватить незавершённое. Возвращает код выхода и отчёты.
 
         Именно эту функцию вызывает SessionStart-хук и `make resume`:
         человеку не нужно объяснять системе, где она остановилась.
+
+        По умолчанию агент подхватывает только свои миссии. Мастер-агентов
+        в одном проекте может быть несколько — по одному на задачу, — и без
+        этого ограничения два чата растаскивали бы работу друг друга.
+        `all_agents=True` — осознанный проход по всему проекту.
         """
         self.rt.sync_skills()
         cleared = self.rt.quota.sweep()
         unblocked = self.rt.sm.unblock_due()
-        missions = self.rt.sm.active_missions()
+        scope = None if all_agents else self.rt.config.agent_id
+        missions = self.rt.sm.active_missions(scope)
         if not missions:
             self.rt.checkpointer.refresh_resume_pointer()
             return EXIT_NOTHING_TO_DO, []
@@ -185,10 +193,14 @@ class Supervisor:
             missions=len(missions),
             quota_cleared=cleared,
             tasks_unblocked=unblocked,
+            agent=scope or "*",
         )
 
         results = [self.advance(m["id"], max_ticks=1 if once else 50) for m in missions]
-        self.rt.checkpointer.refresh_resume_pointer()
+        if all_agents:
+            self.rt.checkpointer.refresh_all_pointers()
+        else:
+            self.rt.checkpointer.refresh_resume_pointer()
 
         if any(r.needs_human for r in results):
             return EXIT_NEEDS_HUMAN, results
@@ -220,10 +232,25 @@ class Supervisor:
         Одна: длинный отчёт на каждом старте съедал бы контекст, ради
         экономии которого построена вся система.
         """
+        from ..paths import DEFAULT_AGENT_ID
+
         pointer = self.rt.checkpointer.resume_pointer()
         missions = pointer.get("missions", [])
+        agent = self.rt.config.agent_id
+        who = "" if agent == DEFAULT_AGENT_ID else f" [{agent}]"
         if not missions:
-            return "AgentOS: незавершённых миссий нет."
+            others = [
+                row
+                for row in self.rt.sm.agents_with_work()
+                if row["agent_id"] != agent
+            ]
+            if others:
+                names = ", ".join(f"{r['agent_id']}:{r['missions']}" for r in others)
+                return (
+                    f"AgentOS{who}: своих незавершённых миссий нет"
+                    f" (у других агентов есть работа — {names})."
+                )
+            return f"AgentOS{who}: незавершённых миссий нет."
         parts = []
         for entry in missions:
             counts = entry.get("counts", {})
@@ -236,14 +263,15 @@ class Supervisor:
                 wait = max(0, int(entry["resume_at"] - time.time()))
                 tail = f", продолжит через {wait}s"
             parts.append(f"{entry['goal'][:60]} [{done}/{total}{tail}]")
-        return "AgentOS подхватил: " + "; ".join(parts)
+        return f"AgentOS{who} подхватил: " + "; ".join(parts)
 
-    def digest(self, mission_id: str = "") -> dict[str, Any]:
+    def digest(self, mission_id: str = "", *, all_agents: bool = False) -> dict[str, Any]:
         """Машиночитаемая сводка для `agentctl status`."""
+        scope = None if all_agents else self.rt.config.agent_id
         missions = (
             [self.rt.sm.get_mission(mission_id)]
             if mission_id
-            else self.rt.sm.active_missions()
+            else self.rt.sm.active_missions(scope)
         )
         out: list[dict[str, Any]] = []
         for mission in [m for m in missions if m]:
@@ -261,6 +289,13 @@ class Supervisor:
                     "needs_human": self._needs_human(mid),
                     "wait_seconds": self.scheduler.wait_seconds(mid),
                     "mode": self.rt.mode,
+                    "agent_id": mission.get("agent_id", ""),
                 }
             )
-        return {"missions": out, "mode": self.rt.mode, "native": self.rt.mode == MODE_NATIVE}
+        return {
+            "missions": out,
+            "mode": self.rt.mode,
+            "native": self.rt.mode == MODE_NATIVE,
+            "agent_id": self.rt.config.agent_id,
+            "agents": self.rt.sm.agents_with_work(),
+        }

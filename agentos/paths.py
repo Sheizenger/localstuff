@@ -100,3 +100,18 @@ def config_layers(root: Path) -> list[Path]:
     layers.append(global_home() / "config")
     layers.append(project_home(root) / "config")
     return [path for path in layers if path.is_dir()]
+
+
+#: Владелец миссий по умолчанию, когда мастер-агент не назвался.
+DEFAULT_AGENT_ID = "default"
+
+
+def agent_id() -> str:
+    """Кто ведёт эти миссии.
+
+    Мастер-агентов может быть несколько — разные чаты под разные задачи в
+    одном проекте. Каждый подхватывает только свои миссии, иначе два чата
+    начали бы растаскивать работу друг друга.
+    """
+    value = os.environ.get("AGENTOS_AGENT_ID", "").strip()
+    return value or DEFAULT_AGENT_ID

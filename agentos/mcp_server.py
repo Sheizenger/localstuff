@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 import traceback
 from collections.abc import Callable
@@ -40,11 +41,21 @@ class AgentOSServer:
     def __init__(self, runtime_factory: Callable[[], Any] | None = None) -> None:
         self._runtime: Any = None
         self._runtime_factory = runtime_factory
+        self._agent = ""
         self._tools = _build_tools()
 
     # ------------------------------------------------------------- рантайм
-    def runtime(self) -> Any:
-        """Один Runtime на процесс, поднимается при первом вызове."""
+    def runtime(self, agent_id: str = "") -> Any:
+        """Один Runtime на процесс, поднимается при первом вызове.
+
+        agent_id переключает мастер-агента: один сервер обслуживает чат,
+        а чатов под разные задачи может быть несколько, и каждый должен
+        видеть только свои миссии.
+        """
+        if agent_id and agent_id != self._agent:
+            self.close()
+            os.environ["AGENTOS_AGENT_ID"] = agent_id
+            self._agent = agent_id
         if self._runtime is None:
             if self._runtime_factory is not None:
                 self._runtime = self._runtime_factory()
@@ -134,10 +145,14 @@ class AgentOSServer:
 
         # stdout — это канал протокола. Любая посторонняя печать из библиотек
         # сломала бы JSON-RPC, поэтому она перехватывается и уходит в текст.
+        # agent обрабатывается здесь, а не в каждом инструменте: это
+        # свойство сессии целиком, а не отдельного вызова.
+        agent = str(arguments.pop("agent", "") or "").strip()
+
         buffer = io.StringIO()
         try:
             with contextlib.redirect_stdout(buffer):
-                text = spec["handler"](self.runtime(), **arguments)
+                text = spec["handler"](self.runtime(agent), **arguments)
         except ToolError as exc:
             return _text_result(str(exc), is_error=True)
         except TypeError as exc:
@@ -386,6 +401,13 @@ def _obj(properties: dict[str, Any], required: list[str] | None = None) -> dict[
 
 def _build_tools() -> dict[str, dict[str, Any]]:
     text = {"type": "string"}
+    agent = {
+        "type": "string",
+        "description": (
+            "ID мастер-агента. Разные чаты под разные задачи берут разные ID"
+            " и не видят миссий друг друга."
+        ),
+    }
     return {
         "agentos_resume": {
             "description": (
@@ -393,7 +415,7 @@ def _build_tools() -> dict[str, dict[str, Any]]:
                 " одна строка ответа скажет, что сделано, чего система ждёт и"
                 " когда продолжит сама."
             ),
-            "schema": _obj({"once": {"type": "boolean"}}),
+            "schema": _obj({"once": {"type": "boolean"}, "agent": agent}),
             "handler": _tool_resume,
         },
         "agentos_goal": {
@@ -407,6 +429,7 @@ def _build_tools() -> dict[str, dict[str, Any]]:
                     "context": text,
                     "budget_tokens": {"type": "integer"},
                     "budget_usd": {"type": "number"},
+                    "agent": agent,
                 },
                 ["goal"],
             ),
@@ -414,7 +437,7 @@ def _build_tools() -> dict[str, dict[str, Any]]:
         },
         "agentos_status": {
             "description": "Что сделано, что блокирует, сколько потрачено, когда продолжит.",
-            "schema": _obj({"mission_id": text}),
+            "schema": _obj({"mission_id": text, "agent": agent}),
             "handler": _tool_status,
         },
         "agentos_task_report": {

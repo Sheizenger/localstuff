@@ -104,12 +104,40 @@ agentctl verify <mission_id> --verdict reject --action "что нужно дод
 | Помнит навыки | `agentctl skill list`, тело — `agentctl skill show <имя>` |
 | Считает токены и деньги | `agentctl status` — расход и остаток бюджета |
 | Переживает обрыв сессии | чекпоинты в `var/runs/`, указатель в `var/resume.json` |
+| Разводит параллельные чаты | `agentctl --agent <имя> …`, все сразу — `status --all` |
 | Ждёт сброса лимитов | задача в `BLOCKED_QUOTA` с точным временем продолжения |
 | Проверяет результат | `agentctl verify <mission>` — гейты + критик по критериям |
 | Подключает возможности | `agentctl capability request mcp github --reason "нужны PR"` |
 | Копит то, что требует человека | `agentctl approve list`, затем `grant <id>` или `deny <id>` |
 | Останавливается при исчерпании бюджета | `agentctl mission budget <id> --tokens 500000 --add` |
 | Учится на применении навыков | `agentctl skill show <имя> --mission <id>`, `agentctl skill used <имя>` |
+
+## 4.1. Если чатов несколько
+
+Мастер-агент — это чат, который ведёт работу. Их может быть несколько:
+по одному на задачу, в одном и том же проекте. Чтобы они не растаскивали
+работу друг друга, каждая миссия принадлежит своему агенту.
+
+Назовись в начале сессии — одним из двух способов:
+
+```bash
+export AGENTOS_AGENT_ID=release     # на всю сессию
+agentctl --agent release status     # разово, у любой команды
+```
+
+Через MCP то же самое — поле `agent` у `agentos_resume`, `agentos_goal`
+и `agentos_status`.
+
+| Что | Команда |
+|---|---|
+| Свои миссии | `agentctl --agent release status` |
+| Все миссии проекта | `agentctl status --all` |
+| Подхватить своё | `agentctl --agent release resume` |
+| Подхватить всё, что стоит | `agentctl resume --all` |
+
+Без имени все чаты работают под общим агентом `default` — это нормально,
+пока задача одна. Указатель resume у каждого агента свой: у `default` —
+привычный `var/resume.json`, у остальных — `var/agents/resume-<имя>.json`.
 
 ## 5. Правила, которые нельзя нарушать
 

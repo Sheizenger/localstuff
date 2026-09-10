@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from ..memory.store import Store
+from ..paths import DEFAULT_AGENT_ID
+from ..paths import agent_id as env_agent_id
 from .machine import NEEDS_HUMAN, MissionStatus, StateMachine, TaskStatus
 
 
@@ -35,6 +37,12 @@ def atomic_write_json(path: Path, data: Any) -> None:
     tmp.replace(path)
 
 
+def agent_slug(agent_id: str) -> str:
+    """Безопасное для файловой системы имя агента."""
+    slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in agent_id).strip("-")
+    return slug or DEFAULT_AGENT_ID
+
+
 def read_json(path: Path, default: Any = None) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -45,10 +53,15 @@ def read_json(path: Path, default: Any = None) -> Any:
 class Checkpointer:
     """Снимает состояние миссии на диск после каждого значимого перехода."""
 
-    def __init__(self, store: Store, runs_dir: Path, home: Path) -> None:
+    def __init__(
+        self, store: Store, runs_dir: Path, home: Path, agent_id: str = ""
+    ) -> None:
         self.store = store
         self.runs_dir = runs_dir
         self.home = home
+        #: Чей это чекпоинтер. Мастер-агентов в одном проекте может быть
+        #: несколько, и каждый ведёт свой указатель resume.
+        self.agent_id = agent_id or env_agent_id()
         self.sm = StateMachine(store)
 
     # ------------------------------------------------------------------ paths
@@ -58,9 +71,20 @@ class Checkpointer:
     def state_path(self, mission_id: str) -> Path:
         return self.mission_dir(mission_id) / "state.json"
 
+    def resume_path_for(self, agent_id: str) -> Path:
+        """Указатель resume конкретного мастер-агента.
+
+        У агента по умолчанию путь прежний — var/resume.json, его читают
+        хуки и скрипты. Остальные агенты пишут рядом, каждый в свой файл:
+        иначе два чата в одном проекте затирали бы указатель друг друга.
+        """
+        if agent_id == DEFAULT_AGENT_ID:
+            return self.home / "resume.json"
+        return self.home / "agents" / f"resume-{agent_slug(agent_id)}.json"
+
     @property
     def resume_path(self) -> Path:
-        return self.home / "resume.json"
+        return self.resume_path_for(self.agent_id)
 
     # ------------------------------------------------------------------ write
     def snapshot(self, mission_id: str) -> dict[str, Any]:
@@ -125,13 +149,15 @@ class Checkpointer:
         self.refresh_resume_pointer()
         return snap
 
-    def refresh_resume_pointer(self) -> dict[str, Any]:
-        """Пересобрать var/resume.json: что подхватить в следующей сессии.
+    def refresh_resume_pointer(self, agent_id: str | None = None) -> dict[str, Any]:
+        """Пересобрать указатель resume: что подхватить в следующей сессии.
 
         Этот файл — контракт с агент-хостом. Его читает SessionStart-хук и
         инструкция в AGENTS.md, поэтому он должен быть понятен без кода.
+        Указатель всегда про одного агента: чужие миссии в него не попадают.
         """
-        missions = self.sm.active_missions()
+        agent = agent_id or self.agent_id
+        missions = self.sm.active_missions(agent)
         entries = []
         for m in missions:
             counts = self.sm.status_counts(m["id"])
@@ -153,10 +179,21 @@ class Checkpointer:
                 not self.sm.is_mission_settled(e["mission_id"]) for e in entries
             ),
             "missions": entries,
+            "agent_id": agent,
             "how_to_continue": "agentctl resume  (или: make resume)",
         }
-        atomic_write_json(self.resume_path, pointer)
+        atomic_write_json(self.resume_path_for(agent), pointer)
         return pointer
+
+    def refresh_all_pointers(self) -> list[dict[str, Any]]:
+        """Обновить указатели всех мастер-агентов, у которых есть работа.
+
+        Нужен там, где проход идёт по всем агентам сразу (`resume --all`):
+        иначе указатель чужого агента остался бы с устаревшими счётчиками.
+        """
+        agents = {row["agent_id"] for row in self.sm.agents_with_work()}
+        agents.add(self.agent_id)
+        return [self.refresh_resume_pointer(agent) for agent in sorted(agents)]
 
     # ------------------------------------------------------------------- read
     def load(self, mission_id: str) -> dict[str, Any] | None:
@@ -178,13 +215,17 @@ class Checkpointer:
         )
         return [r["criterion"] for r in rows if r["status"] not in ("pass", "skipped")]
 
-    def settle_missions(self) -> list[str]:
+    def settle_missions(
+        self, agent_id: str | None = None, *, all_agents: bool = False
+    ) -> list[str]:
         """Перевести миссии, где всё доделано, в терминальный статус.
 
+        По умолчанию трогает только миссии своего мастер-агента.
         Возвращает id миссий, статус которых изменился.
         """
+        scope = None if all_agents else (agent_id or self.agent_id)
         changed: list[str] = []
-        for mission in self.sm.active_missions():
+        for mission in self.sm.active_missions(scope):
             mid = mission["id"]
             if not self.sm.is_mission_settled(mid):
                 continue

@@ -16,6 +16,7 @@ from typing import Any
 
 from ..errors import InvalidTransition
 from ..memory.store import Store
+from ..paths import DEFAULT_AGENT_ID
 
 
 class TaskStatus(StrEnum):
@@ -155,13 +156,16 @@ class StateMachine:
         budget_usd: float = 0.0,
         mode: str = "auto",
         meta: dict[str, Any] | None = None,
+        agent_id: str = DEFAULT_AGENT_ID,
     ) -> str:
+        """Завести миссию. agent_id — какой мастер-агент её ведёт."""
         mission_id = new_id("m")
         now = time.time()
         with self.store.tx() as conn:
             conn.execute(
                 "INSERT INTO missions(id, goal, context, status, mode, budget_tokens,"
-                " budget_usd, meta, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                " budget_usd, meta, agent_id, created_at, updated_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     mission_id,
                     goal,
@@ -171,6 +175,7 @@ class StateMachine:
                     budget_tokens,
                     budget_usd,
                     json.dumps(meta or {}, ensure_ascii=False),
+                    agent_id or DEFAULT_AGENT_ID,
                     now,
                     now,
                 ),
@@ -195,11 +200,39 @@ class StateMachine:
                 (status.value, blocked_reason, resume_after, time.time(), mission_id),
             )
 
-    def active_missions(self) -> list[dict[str, Any]]:
-        """Миссии, которые ещё не закончены."""
+    def active_missions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        """Миссии, которые ещё не закончены.
+
+        agent_id ограничивает выборку одним мастер-агентом. Это и есть
+        разделение работы между чатами: каждый подхватывает своё, а не
+        растаскивает чужое.
+        """
+        terminal = (
+            MissionStatus.DONE.value,
+            MissionStatus.FAILED.value,
+            MissionStatus.CANCELLED.value,
+        )
+        if agent_id is None:
+            return self.store.query(
+                "SELECT * FROM missions WHERE status NOT IN (?,?,?) ORDER BY created_at",
+                terminal,
+            )
         return self.store.query(
-            "SELECT * FROM missions WHERE status NOT IN (?,?,?) ORDER BY created_at",
-            (MissionStatus.DONE.value, MissionStatus.FAILED.value, MissionStatus.CANCELLED.value),
+            "SELECT * FROM missions WHERE status NOT IN (?,?,?) AND agent_id=?"
+            " ORDER BY created_at",
+            (*terminal, agent_id),
+        )
+
+    def agents_with_work(self) -> list[dict[str, Any]]:
+        """Какие мастер-агенты сейчас что-то ведут — для status и диагностики."""
+        return self.store.query(
+            "SELECT agent_id, COUNT(*) AS missions FROM missions"
+            " WHERE status NOT IN (?,?,?) GROUP BY agent_id ORDER BY agent_id",
+            (
+                MissionStatus.DONE.value,
+                MissionStatus.FAILED.value,
+                MissionStatus.CANCELLED.value,
+            ),
         )
 
     # ---------------------------------------------------------------- tasks

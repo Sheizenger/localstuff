@@ -171,7 +171,9 @@ class Runtime:
 
     @cached_property
     def checkpointer(self) -> Checkpointer:
-        return Checkpointer(self.store, self.config.runs_dir, self.config.home)
+        return Checkpointer(
+            self.store, self.config.runs_dir, self.config.home, self.config.agent_id
+        )
 
     @cached_property
     def capabilities(self):

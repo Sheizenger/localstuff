@@ -83,6 +83,7 @@ class Intake:
             budget_tokens=budget_tokens or int(self.rt.config.get("budget.mission_tokens", 0)),
             budget_usd=budget_usd or float(self.rt.config.get("budget.mission_usd", 0.0)),
             mode=self.rt.mode,
+            agent_id=self.rt.config.agent_id,
         )
         spec = self._elicit(goal, context)
         self._persist_dod(mission_id, spec)

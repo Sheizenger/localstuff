@@ -19,7 +19,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Каждый элемент — одна миграция. Индекс + 1 = номер версии схемы.
 MIGRATIONS: list[str] = [
@@ -205,6 +205,13 @@ MIGRATIONS: list[str] = [
         created_at REAL NOT NULL,
         decided_at REAL
     );
+    """,
+    # --- v2: у миссии появляется владелец ---------------------------------
+    # Мастер-агентов может быть несколько: разные чаты, разные задачи, один
+    # проект. Без владельца resume в одном чате растаскивал бы работу другого.
+    """
+    ALTER TABLE missions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'default';
+    CREATE INDEX IF NOT EXISTS idx_missions_agent ON missions(agent_id, status);
     """,
 ]
 

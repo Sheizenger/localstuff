@@ -23,7 +23,14 @@ from typing import Any
 import yaml
 
 from .errors import ConfigError
-from .paths import config_layers, find_project_root, global_home, project_home, project_state
+from .paths import (
+    agent_id,
+    config_layers,
+    find_project_root,
+    global_home,
+    project_home,
+    project_state,
+)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -250,6 +257,11 @@ class Config:
     def home(self) -> Path:
         """Рантайм-состояние проекта: <проект>/.agentos/var."""
         return project_state(self.root)
+
+    @property
+    def agent_id(self) -> str:
+        """Идентификатор мастер-агента, ведущего эти миссии."""
+        return agent_id()
 
     @property
     def project_dir(self) -> Path:

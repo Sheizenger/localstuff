@@ -58,6 +58,10 @@ def _runtime(args: argparse.Namespace):
 
     if getattr(args, "mode", ""):
         os.environ["AGENTOS_MODE"] = args.mode
+    if getattr(args, "agent", ""):
+        # Через переменную окружения, а не только в объекте: её унаследуют
+        # субагенты и гейты, запущенные из этой команды.
+        os.environ["AGENTOS_AGENT_ID"] = args.agent
     return Runtime.open()
 
 
@@ -219,10 +223,11 @@ def cmd_resume(args: argparse.Namespace) -> int:
     rt = _runtime(args)
     try:
         sup = Supervisor(rt)
+        every = getattr(args, "all_agents", False)
         if args.announce:
             # Одна строка: старт сессии не должен съедать контекст отчётом.
             announcement = sup.announce()
-            code, results = sup.resume(once=args.once)
+            code, results = sup.resume(once=args.once, all_agents=every)
             if code == EXIT_NOTHING_TO_DO and not results:
                 if not args.quiet:
                     out(announcement)
@@ -231,9 +236,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
             _print_handoffs([h for r in results for h in r.handoffs])
             return code
 
-        code, results = sup.resume(once=args.once)
+        code, results = sup.resume(once=args.once, all_agents=every)
         if not results:
             out("незавершённых миссий нет")
+            _print_other_agents(rt)
             return code
         for result in results:
             _print_mission(rt, result.mission_id)
@@ -249,7 +255,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     rt = _runtime(args)
     try:
         sup = Supervisor(rt)
-        digest = sup.digest(args.mission or "")
+        digest = sup.digest(args.mission or "", all_agents=getattr(args, "all_agents", False))
 
         if args.resume_in_seconds:
             waits = [m["wait_seconds"] for m in digest["missions"] if m["wait_seconds"]]
@@ -261,15 +267,31 @@ def cmd_status(args: argparse.Namespace) -> int:
 
         if not digest["missions"]:
             out("активных миссий нет")
+            _print_other_agents(rt)
             totals = rt.ledger.totals()
             out(f"всего израсходовано: {totals['tokens']} токенов, ${totals['usd']:.4f}")
             return 0
         for mission in digest["missions"]:
             _print_mission(rt, mission["mission_id"])
             out("")
+        _print_other_agents(rt)
         return 0
     finally:
         rt.close()
+
+
+def _print_other_agents(rt: Any) -> None:
+    """Сказать, что работа есть у других мастер-агентов.
+
+    Без этой строки «активных миссий нет» читалось бы как «работы нет
+    вообще», хотя соседний чат в этом же проекте ведёт свою миссию.
+    """
+    mine = rt.config.agent_id
+    others = [row for row in rt.sm.agents_with_work() if row["agent_id"] != mine]
+    if not others:
+        return
+    names = ", ".join(f"{row['agent_id']}({row['missions']})" for row in others)
+    out(f"другие мастер-агенты: {names}   — посмотреть все: agentctl status --all")
 
 
 def _print_mission(rt: Any, mission_id: str) -> None:
@@ -922,6 +944,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="native — субагентов запускает агент-хост; direct — сам AgentOS",
     )
+    parser.add_argument(
+        "--agent",
+        default="",
+        metavar="ID",
+        help=(
+            "какой мастер-агент ведёт работу (или AGENTOS_AGENT_ID)."
+            " Разные чаты под разные задачи берут разные ID и не мешают друг другу"
+        ),
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="создать состояние и проиндексировать навыки").set_defaults(
@@ -942,6 +973,12 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--announce", action="store_true", help="одна строка вместо отчёта")
     resume.add_argument("--once", action="store_true", help="один проход планировщика")
     resume.add_argument("--quiet", action="store_true", help="молчать, если работы нет")
+    resume.add_argument(
+        "--all",
+        dest="all_agents",
+        action="store_true",
+        help="подхватить миссии всех мастер-агентов проекта, а не только свои",
+    )
     resume.set_defaults(func=cmd_resume)
 
     status = sub.add_parser("status", help="короткий дайджест состояния")
@@ -951,6 +988,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--resume-in-seconds",
         action="store_true",
         help="напечатать только число секунд до продолжения (для скриптов)",
+    )
+    status.add_argument(
+        "--all",
+        dest="all_agents",
+        action="store_true",
+        help="показать миссии всех мастер-агентов проекта",
     )
     status.set_defaults(func=cmd_status)
 
