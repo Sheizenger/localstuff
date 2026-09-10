@@ -1,0 +1,10 @@
+# Контекст сборки должен быть маленьким и без состояния хоста.
+.git
+.venv
+var
+.agentos
+**/__pycache__
+*.pyc
+evals/runs
+docs
+tests

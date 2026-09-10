@@ -870,6 +870,27 @@ def cmd_approve(args: argparse.Namespace) -> int:
         rt.close()
 
 
+def cmd_sandbox(args: argparse.Namespace) -> int:
+    """Прогнать agentctl в контейнере, а не на машине человека."""
+    from .sandbox import Sandbox, SandboxError
+
+    box = Sandbox.from_env()
+    if getattr(args, "agent", ""):
+        box.env["AGENTOS_AGENT_ID"] = args.agent
+    try:
+        if args.build:
+            box.build(printer=lambda text: print(text, file=sys.stderr))
+            out(f"образ готов: {box.image}")
+            return 0
+        if args.print_command:
+            out(" ".join(box.run_argv(list(args.args))))
+            return 0
+        return box.run(list(args.args), printer=lambda text: print(text, file=sys.stderr))
+    except SandboxError as exc:
+        out(str(exc))
+        return 1
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     """Подключить AgentOS к текущему проекту."""
     from pathlib import Path as _Path
@@ -1138,6 +1159,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-mcp", action="store_true", help="не регистрировать MCP-сервер"
     )
     install_cmd.set_defaults(func=cmd_install)
+
+    sandbox = sub.add_parser(
+        "sandbox",
+        help="запустить agentctl в контейнере: агент не дотянется до системы",
+    )
+    sandbox.add_argument(
+        "args", nargs=argparse.REMAINDER, help="команда agentctl внутри контейнера"
+    )
+    sandbox.add_argument("--build", action="store_true", help="только собрать образ")
+    sandbox.add_argument(
+        "--print-command",
+        action="store_true",
+        help="напечатать команду запуска и выйти, ничего не запуская",
+    )
+    sandbox.set_defaults(func=cmd_sandbox)
 
     mcp = sub.add_parser(
         "mcp", help="MCP-сервер на stdio: подключение к любому агент-хосту"
