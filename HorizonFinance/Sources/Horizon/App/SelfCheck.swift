@@ -466,6 +466,82 @@ enum SelfCheck {
 
         expect(ProductMatcher.normalize("LECHE ENT. 1L") == "leche ent l", "нормализация строки чека",
                ProductMatcher.normalize("LECHE ENT. 1L"))
+
+        checkRealBMReceipt()
+    }
+
+    /// Настоящий чек BM Supermercados (Баракальдо) — на нём первая версия разбора
+    /// ошибалась четырьмя способами сразу, поэтому он живёт в проверках целиком.
+    private static func checkRealBMReceipt() {
+        let lines = [
+            "BM",
+            "ESKERRIK ASKO ZURE EROSKETAGATIK",
+            "GRACIAS POR TU COMPRA",
+            "C/ SOCIEDAD SANTABARBARA, 1. 48901 BARAKALDO",
+            "Teléfono de atención al cliente 900 555 300",
+            "UD/KG  €/UD/KG  IMPORTE",
+            "- FRUTERIA -",
+            "1  GOURMET BM 175G  1.39",
+            "1  RUCULA 20% DTO  1.67",
+            "Promoción DTO 20%: 0.42 €",
+            "0.39  PEPINO CORTO  2.49  0.96",
+            "1  CEBOLLETA MANOJO  1.99",
+            "0.64  TOMATE RAMA  3.25  2.08",
+            "- ALIMENTACIÓN -",
+            "1  CHICLE MIGUELAÑEZ MELONES 16  3.19",
+            "1  AGUA PERRIER 1L  1.65",
+            "1  LIMONADA D.SIMON 1,5L  1.40",
+            "1  ZUMO JUVER FRUT.TROP.100% FR  2.19",
+            "1  AGUA FONT-VELLA G/6,25L  2.49",
+            "1  HARIBO FAVORITOS RED MIX 150  2.29",
+            "1  TE TWININGS EARL GREY 25SOBR  5.59",
+            "1  HARIBO FAVORITOS CLASSIC 150  2.29",
+            "1  EMPANADILLAS COCINERA ATUN31  5.22",
+            "1  CANELONES CARNE COCINERA 500  3.99",
+            "- DROGUERIA-PERFUMERIA -",
+            "1  BOLSA BASURA BM ORGAN.45X45  1.75",
+            "1  BOLSA BASURA BM PERF 55X60 2  1.79",
+            "2  BOLSA CAMISETA 51X60 BM CAST  0.16  0.32",
+            "TOTAL COMPRA (iva incl.)  42.25",
+            "TARJETA  42.25",
+            "POR COMPRAR EN BM SUPERMERCADOS:",
+            "CON CUENTA BM HUBIERAS AHORRADO:  0.25",
+            "Tipo  Base  Iva  Req  Total",
+            "10.00%  26.27  2.63  0.00  28.90"
+        ]
+        let receipt = ReceiptParser.parse(ScannedDocument(lines: lines, codes: [], usedOCR: true), aliases: [:])
+
+        expect(receipt.lines.count == 18, "чек BM: разобрано 18 позиций", "получилось \(receipt.lines.count)")
+        expect(near(receipt.printedTotal ?? 0, 42.25), "чек BM: итог прочитан, хотя рядом стоит «(iva incl.)»",
+               "\(String(describing: receipt.printedTotal))")
+        expect(near(receipt.linesTotal, 42.25), "чек BM: позиции сходятся с итогом до цента", "\(receipt.linesTotal)")
+        expect(receipt.chainID == "es_bm", "чек BM: сеть узнана по подвалу чека", receipt.merchantName)
+
+        let rucula = receipt.lines.first(where: { $0.raw.contains("RUCULA") })
+        expect((rucula?.amount ?? 0) > 0, "чек BM: «RUCULA 20% DTO» — товар, а не скидка",
+               "\(String(describing: rucula?.amount))")
+        expect(!receipt.lines.contains(where: { $0.raw.contains("AHORRADO") }),
+               "чек BM: «сколько бы вы сэкономили» не стало позицией")
+        expect(!receipt.lines.contains(where: { $0.isDiscount }),
+               "чек BM: справочная скидка убрана, иначе она вычлась бы дважды")
+
+        let pepino = receipt.lines.first(where: { $0.productID == "cucumber" })
+        expect(near(pepino?.quantity ?? 0, 0.39, 0.001), "чек BM: вес из первой колонки стал количеством",
+               "\(String(describing: pepino?.quantity))")
+
+        let limonada = receipt.lines.first(where: { $0.raw.contains("LIMONADA") })
+        expect(limonada?.productID == "soda", "чек BM: лимонад — напиток, а не цитрус",
+               "\(String(describing: limonada?.productID))")
+        expect(near(limonada?.quantity ?? 0, 1), "чек BM: «1,5L» в названии — объём, а не количество",
+               "\(String(describing: limonada?.quantity))")
+
+        let haribo = receipt.lines.first(where: { $0.raw.contains("HARIBO") })
+        expect(haribo?.productID == "sweets", "чек BM: HARIBO — сладкое",
+               "\(String(describing: haribo?.productID))")
+
+        let bag = receipt.lines.first(where: { $0.raw.contains("CAMISETA") })
+        expect(bag?.category == .household, "чек BM: пакет на кассе — бытовое",
+               "\(String(describing: bag?.category))")
     }
 
     /// Повторяющиеся операции: даты не должны съезжать в коротких месяцах,

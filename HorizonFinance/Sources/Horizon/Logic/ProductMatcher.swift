@@ -30,7 +30,7 @@ enum ProductMatcher {
         "potato": ["patata", "patatas", "boniato"],
         "tomato": ["tomate"],
         "cucumber": ["pepino"],
-        "onion": ["cebolla", "ajo", "puerro"],
+        "onion": ["cebolla", "cebolleta", "ajo", "puerro"],
         "carrot": ["zanahoria"],
         "pepper": ["pimiento", "calabacin", "berenjena", "calabaza"],
         "salad": ["lechuga", "ensalada", "canonigos", "rucula", "espinaca", "brocoli", "coliflor", "judia"],
@@ -43,7 +43,7 @@ enum ProductMatcher {
         // Бакалея
         "bread": ["pan ", "barra", "hogaza", "chapata", "ogia", "baguette", "pan"],
         "rice": ["arroz"],
-        "pasta": ["pasta", "macarron", "espagueti", "fideo", "tallarin"],
+        "pasta": ["pasta", "macarron", "espagueti", "fideo", "tallarin", "canelon", "lasana", "raviol", "noqui"],
         "legumes": ["lenteja", "garbanzo", "alubia", "judias", "maiz", "tomate frito", "conserva"],
         "flour": ["harina"],
         "sugar": ["azucar"],
@@ -57,13 +57,14 @@ enum ProductMatcher {
         "cereal": ["cereales", "muesli", "granola"],
         "coffee": ["cafe", "kafea", "capsula", "descafeinado"],
         "tea": ["te ", "infusion", "manzanilla", "poleo"],
-        "sweets": ["galleta", "bolleria", "croissant", "magdalena", "bizcocho", "donut", "tarta", "helado"],
+        "sweets": ["galleta", "bolleria", "croissant", "magdalena", "bizcocho", "donut", "tarta", "helado",
+                   "chicle", "haribo", "gominola", "chuche", "caramelo", "regaliz", "golosina"],
         "sauces": ["salsa", "mayonesa", "ketchup", "mostaza", "vinagre", "sal ", "especia", "pimienta", "caldo", "sofrito"],
 
         // Напитки
         "water": ["agua", "ura"],
         "juice": ["zumo", "nectar", "batido"],
-        "soda": ["refresco", "cola", "gaseosa", "tonica", "fanta", "sprite", "aquarius", "nestea"],
+        "soda": ["refresco", "cola", "gaseosa", "tonica", "fanta", "sprite", "aquarius", "nestea", "limonada", "bitter"],
         "alcohol": ["cerveza", "vino", "garagardo", "sidra", "rioja", "tinto", "blanco", "cava", "ron", "ginebra", "whisky"],
 
         // Бытовое и гигиена
@@ -78,7 +79,8 @@ enum ProductMatcher {
         "toothpaste": ["dentifrico", "pasta de dientes", "cepillo dental", "colutorio", "enjuague"],
         "dishsoap": ["lavavajillas", "friegaplatos"],
         "cleaner": ["limpiador", "limpiahogar", "lejia", "amoniaco", "desinfectante", "multiusos"],
-        "kitchenstuff": ["estropajo", "bayeta", "papel cocina", "aluminio", "film", "bolsa congelacion", "servilleta"],
+        "kitchenstuff": ["estropajo", "bayeta", "papel cocina", "aluminio", "film", "bolsa congelacion",
+                         "servilleta", "bolsa camiseta"],
         "trashbags": ["bolsa basura", "basura"],
         "pharmacy": ["farmacia", "vitamina", "ibuprofeno", "paracetamol", "tirita", "botiquin"],
 

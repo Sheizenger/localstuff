@@ -13,11 +13,13 @@ enum ReceiptParser {
         receipt.rawText = document.lines
 
         applyCodes(document.codes, to: &receipt)
-        receipt.merchantName = detectMerchantName(in: document.lines) ?? receipt.merchantName
-        receipt.chainID = detectChainID(name: receipt.merchantName, lines: document.lines)
+        let chain = detectChain(in: document.lines)
+        receipt.chainID = chain?.id
+        receipt.merchantName = chain?.name ?? detectMerchantName(in: document.lines) ?? receipt.merchantName
         if receipt.date == nil { receipt.date = detectDate(in: document.lines) }
         receipt.printedTotal = detectTotal(in: document.lines)
         receipt.lines = detectItems(in: document.lines, aliases: aliases)
+        reconcile(&receipt)
 
         if receipt.lines.isEmpty {
             receipt.warnings.append("Не удалось разобрать ни одной позиции — проверьте качество снимка.")
@@ -62,25 +64,14 @@ enum ReceiptParser {
         return (" " + haystack + " ").contains(" " + needle + " ")
     }
 
+    /// Запасной вариант, когда сети нет в справочнике: первая содержательная строка шапки.
+    /// Строку с ценой пропускаем — это уже позиция, а не вывеска.
     static func detectMerchantName(in lines: [String]) -> String? {
-        let head = lines.prefix(8)
-        for line in head {
-            let normalized = ProductMatcher.normalize(line)
-            for country in BasketCatalog.countries {
-                for chain in country.chains {
-                    let needle = ProductMatcher.normalize(chain.name)
-                    if containsWord(normalized, needle) {
-                        return chain.name
-                    }
-                }
-            }
-        }
-        // Иначе берём первую содержательную строку — обычно это вывеска магазина.
-        for line in head {
+        for line in lines.prefix(8) {
             let cleaned = line.trimmingCharacters(in: .whitespaces)
-            if cleaned.count >= 3 && ProductMatcher.normalize(cleaned).count >= 3 && !isServiceLine(cleaned) {
-                return cleaned
-            }
+            guard cleaned.count >= 3, ProductMatcher.normalize(cleaned).count >= 3 else { continue }
+            guard !isServiceLine(cleaned), money(in: cleaned).isEmpty else { continue }
+            return cleaned
         }
         return nil
     }
@@ -98,15 +89,36 @@ enum ReceiptParser {
         return fastFoodMerchants.contains { normalized.contains(ProductMatcher.normalize($0)) }
     }
 
-    static func detectChainID(name: String, lines: [String]) -> String? {
-        let haystack = ProductMatcher.normalize(name + " " + lines.prefix(8).joined(separator: " "))
+    /// Сеть ищем сначала в шапке, а если там не нашлось — по всему чеку.
+    ///
+    /// У BM вывеска в шапке сокращена до «BM», а полное «BM SUPERMERCADOS» стоит
+    /// в подвале, после позиций. По всему чеку ищем только длинные названия: короткое
+    /// «Dia» или «Coop» слишком легко встретить внутри обычного текста.
+    static func detectChain(in lines: [String]) -> StoreChain? {
+        if let fromHeader = firstChain(inText: lines.prefix(10).joined(separator: " "), minimumLength: 1) {
+            return fromHeader
+        }
+        return firstChain(inText: lines.joined(separator: " "), minimumLength: 5)
+    }
+
+    static func firstChain(inText text: String, minimumLength: Int) -> StoreChain? {
+        let haystack = ProductMatcher.normalize(text)
         guard !haystack.isEmpty else { return nil }
+
+        // Побеждает самое длинное название: «BM Supermercados» точнее, чем «BM».
+        var best: StoreChain? = nil
+        var bestLength = 0
         for country in BasketCatalog.countries {
             for chain in country.chains {
-                if containsWord(haystack, ProductMatcher.normalize(chain.name)) { return chain.id }
+                let needle = ProductMatcher.normalize(chain.name)
+                guard needle.count >= minimumLength, needle.count > bestLength else { continue }
+                if containsWord(haystack, needle) {
+                    best = chain
+                    bestLength = needle.count
+                }
             }
         }
-        return nil
+        return best
     }
 
     // MARK: Дата
@@ -148,49 +160,116 @@ enum ReceiptParser {
 
     // MARK: Итог
 
-    private static let totalKeywords = ["total a pagar", "total", "importe total", "a pagar", "importe", "guztira"]
-    private static let totalExclusions = ["articulos", "iva", "base", "descuento", "ahorro", "puntos", "acumulado"]
+    private static let totalKeywords = ["total", "importe total", "a pagar", "importe", "guztira"]
+    private static let totalExclusions = ["articulos", "base", "cuota", "descuento", "ahorro", "puntos", "acumulado"]
 
+    /// Итог ищем только в строках, которые с него и начинаются.
+    ///
+    /// «TOTAL COMPRA (iva incl.)» — это итог, а «Tipo Base Iva Req Total» — шапка
+    /// налоговой таблицы: слово «total» там в конце. Из подходящих берём наибольшую
+    /// сумму: в чеке рядом стоят «total artículos» и настоящий итог к оплате.
     static func detectTotal(in lines: [String]) -> Double? {
         var candidate: Double? = nil
         for line in lines {
             let normalized = ProductMatcher.normalize(line)
-            guard totalKeywords.contains(where: { normalized.contains($0) }) else { continue }
+            guard totalKeywords.contains(where: { normalized.hasPrefix($0) }) else { continue }
             guard !totalExclusions.contains(where: { normalized.contains($0) }) else { continue }
-            if let value = money(in: line).last, value > 0 {
-                candidate = value
-            }
+            guard let value = money(in: line).last, value > 0 else { continue }
+            candidate = max(candidate ?? 0, value)
         }
         return candidate
+    }
+
+    // MARK: Сверка с итогом
+
+    /// Приводит позиции к напечатанному итогу, когда расходится только строка скидки.
+    ///
+    /// BM печатает «Promoción DTO 20%: 0.42 €» справочно — цены позиций уже со скидкой,
+    /// и вычесть её ещё раз значит занизить чек. Другие сети, наоборот, печатают скидку
+    /// отдельной строкой, которую вычитать нужно. Кто из них прав в этом чеке, решает итог.
+    static func reconcile(_ receipt: inout ParsedReceipt) {
+        guard let printed = receipt.printedTotal, printed > 0 else { return }
+        guard abs(printed - receipt.linesTotal) > 0.02 else { return }
+        guard receipt.lines.contains(where: { $0.isDiscount }) else { return }
+
+        let withoutDiscounts = receipt.lines.filter { !$0.isDiscount }
+        if abs(printed - withoutDiscounts.reduce(0.0) { $0 + $1.amount }) <= 0.02 {
+            receipt.lines = withoutDiscounts
+            receipt.warnings.append("Скидка в чеке указана справочно — цены позиций уже с ней. Строка скидки убрана, чтобы не вычесть её дважды.")
+            return
+        }
+
+        let flipped = receipt.lines.map { line -> ReceiptLine in
+            guard line.isDiscount else { return line }
+            var copy = line
+            copy.amount = abs(line.amount)
+            copy.isDiscount = false
+            return copy
+        }
+        if abs(printed - flipped.reduce(0.0) { $0 + $1.amount }) <= 0.02 {
+            receipt.lines = flipped
+            receipt.warnings.append("Строка со словом «скидка» оказалась обычной позицией — так сходится с итогом чека.")
+        }
     }
 
     // MARK: Позиции
 
     private static let stopWords = [
-        "iva", "base imponible", "cuota", "tarjeta", "efectivo", "cambio", "entregado",
+        "base imponible", "cuota", "tarjeta", "efectivo", "cambio", "entregado",
         "total", "importe", "a pagar", "gracias", "atendido", "caja", "cajero", "operacion",
         "factura", "ticket", "tbai", "verifactu", "nif", "cif", "telefono", "direccion",
         "socio", "puntos", "ahorro", "descuentos", "articulos", "www", "horario", "devolucion",
-        "cliente", "vendedor", "fecha", "hora", "copia", "original", "iban", "autorizacion"
+        "cliente", "vendedor", "fecha", "hora", "copia", "original", "iban", "autorizacion",
+        // Подвал чека: благодарности и «сколько бы вы сэкономили с картой».
+        "ahorrado", "hubieras", "eskerrik", "atencion al cliente", "por comprar", "tipo base",
+        // Заголовки отделов — не товар.
+        "fruteria", "alimentacion", "drogueria", "perfumeria", "carniceria", "pescaderia",
+        "panaderia", "charcuteria"
     ]
+
+    /// Слова, которые ловим только целиком: «iva» иначе найдётся внутри «AVIVA» и «IVAN».
+    private static let stopWordsExact = ["iva"]
 
     static func isServiceLine(_ line: String) -> Bool {
         let normalized = ProductMatcher.normalize(line)
         guard !normalized.isEmpty else { return true }
-        return stopWords.contains(where: { normalized.contains($0) })
+        // Строка скидки выглядит служебной, но её нужно разобрать — она меняет сумму чека.
+        if discountPrefixes.contains(where: { normalized.hasPrefix($0) }) { return false }
+        if stopWords.contains(where: { normalized.contains($0) }) { return true }
+        return stopWordsExact.contains(where: { containsWord(normalized, $0) })
+    }
+
+    static func lettersOnly(_ text: String) -> String {
+        ProductMatcher.normalize(text).replacingOccurrences(of: " ", with: "")
     }
 
     static func detectItems(in lines: [String], aliases: [String: String]) -> [ReceiptLine] {
         var items: [ReceiptLine] = []
+        /// Название с предыдущей строки: Mercadona печатает весовой товар в две строки —
+        /// «PLATANO», а под ним «0,462 kg x 2,15 EUR/kg   0,99».
+        var carriedName: String? = nil
 
         for raw in lines {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            guard trimmed.count >= 4, !isServiceLine(trimmed) else { continue }
+            guard trimmed.count >= 4, !isServiceLine(trimmed) else {
+                carriedName = nil
+                continue
+            }
 
             let values = money(in: trimmed)
-            guard let amountValue = values.last else { continue }
+            guard let amountValue = values.last else {
+                // Строка без суммы, но со словами — возможно, название весового товара.
+                let candidate = nameFragment(of: trimmed)
+                carriedName = lettersOnly(candidate).count >= 3 ? candidate : nil
+                continue
+            }
 
-            let namePart = nameFragment(of: trimmed)
+            var namePart = nameFragment(of: trimmed)
+            if lettersOnly(namePart).count < 3, let carried = carriedName {
+                namePart = carried
+            }
+            carriedName = nil
+
             let letters = ProductMatcher.normalize(namePart)
             guard letters.replacingOccurrences(of: " ", with: "").count >= 3 else { continue }
 
@@ -218,11 +297,15 @@ enum ReceiptParser {
         return items
     }
 
+    /// Скидка — это строка, которая со слова о скидке начинается.
+    ///
+    /// Раньше хватало слова «dto» в любом месте, и товар «RUCULA 20% DTO» уходил
+    /// в минус: акция в названии — это всё ещё покупка.
+    static let discountPrefixes = ["dto", "descuento", "promocion", "promo", "ahorro", "cupon", "vale"]
+
     static func isDiscountLine(_ line: String) -> Bool {
         let normalized = ProductMatcher.normalize(line)
-        if normalized.contains("dto") || normalized.contains("descuento") || normalized.contains("promocion") {
-            return true
-        }
+        if discountPrefixes.contains(where: { normalized.hasPrefix($0) }) { return true }
         // Явный минус перед суммой в конце строки.
         return firstMatch(pattern: "-\\s?[0-9]+[.,][0-9]{2}\\s*€?\\s*$", in: line) != nil
     }
@@ -246,11 +329,14 @@ enum ReceiptParser {
         return text.trimmingCharacters(in: CharacterSet(charactersIn: " \t.,;:*-")).trimmingCharacters(in: .whitespaces)
     }
 
-    /// Количество: явное «2 x», вес «0,462 kg» или единица по умолчанию.
+    /// Количество: вес или дробное число в начале строки, явное «2 x», иначе единица.
+    ///
+    /// Число ищем именно в начале: в колонке количества. Внутри названия цифры значат
+    /// объём упаковки — «LIMONADA D.SIMON 1,5L» это одна бутылка, а не полтора литра на вес.
     static func quantity(in line: String) -> Double {
-        if let groups = firstMatch(pattern: "([0-9]+[.,][0-9]+)\\s*(kg|kilo|l|lt)", in: line.lowercased()),
+        if let groups = firstMatch(pattern: "^\\s*([0-9]+[.,][0-9]+)\\s*(kg|kilo|l|lt|ud|uds)?\\s", in: line.lowercased()),
            groups.count >= 2,
-           let weight = parseMoney(groups[1]), weight > 0 {
+           let weight = parseMoney(groups[1]), weight > 0, weight < 100 {
             return weight
         }
         if let groups = firstMatch(pattern: "^\\s*([0-9]{1,2})\\s+", in: line), groups.count >= 2,
