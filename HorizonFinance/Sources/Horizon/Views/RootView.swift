@@ -3,6 +3,9 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var bus: UIBus
+    /// Менеджер отмены окна отдаём хранилищу: ⌘Z в меню «Правка» начинает отменять
+    /// добавление и удаление записей, а внутри текстового поля — по-прежнему набор текста.
+    @Environment(\.undoManager) private var undoManager
 
     private var selection: Binding<AppSection?> {
         Binding(
@@ -29,9 +32,11 @@ struct RootView: View {
                 .environmentObject(store)
         }
         .onAppear {
+            store.undoManager = undoManager
             // Аренда и подписки известны заранее — создаём их сами, а не ждём ручного ввода.
             store.applyRecurringRules()
             store.runNotifications()
+            store.backUpIfNeeded()
         }
         .sheet(isPresented: $bus.showReceiptImport) {
             ReceiptImportView()

@@ -60,9 +60,75 @@ enum SelfCheck {
         checkNotifications()
         checkStatement()
         checkMigration()
+        checkHygiene()
         checkFormatting()
 
         return failures
+    }
+
+    /// Отмена, возврат и дублирование: то, что чинит ошибку пользователя, само ошибаться не должно.
+    private static func checkHygiene() {
+        print("\nОтмена и дублирование:")
+
+        let store = Store(data: AppData.starter(), persists: false)
+        let manager = UndoManager()
+        // В приложении шаги группирует цикл событий; в проверке его нет, группируем сами.
+        manager.groupsByEvent = false
+        store.undoManager = manager
+
+        func step(_ body: () -> Void) {
+            manager.beginUndoGrouping()
+            body()
+            manager.endUndoGrouping()
+        }
+
+        let before = store.data.transactions.count
+        var txn = Txn()
+        txn.amount = 12.5
+        txn.note = "Кофе"
+        txn.receiptLines = [ReceiptLine(raw: "1 CAFE 12,50", name: "CAFE", quantity: 1, amount: 12.5)]
+        step { store.addTransaction(txn) }
+
+        expect(store.data.transactions.count == before + 1, "операция добавлена")
+        expect(manager.canUndo, "после добавления есть что отменять")
+
+        manager.undo()
+        expect(store.data.transactions.count == before, "отмена убрала операцию",
+               "осталось \(store.data.transactions.count)")
+        expect(manager.canRedo, "после отмены есть что вернуть")
+
+        manager.redo()
+        expect(store.data.transactions.count == before + 1, "возврат вернул операцию",
+               "стало \(store.data.transactions.count)")
+
+        var copy = Txn()
+        step { copy = store.duplicateTransaction(txn) }
+        expect(copy.id != txn.id, "у копии свой идентификатор")
+        expect(near(copy.amount, txn.amount), "сумма копии совпадает")
+        expect(copy.receiptLines.first?.id != txn.receiptLines.first?.id,
+               "строки чека в копии тоже получают свои идентификаторы")
+        expect(store.data.transactions.filter { $0.note == "Кофе" }.count == 2, "копия попала в список")
+
+        manager.undo()
+        expect(store.data.transactions.filter { $0.note == "Кофе" }.count == 1,
+               "отмена снимает именно дублирование")
+
+        // Удаление тоже отменяемо — это главное, ради чего всё и затевалось.
+        let remaining = store.data.transactions.count
+        if let victim = store.data.transactions.first {
+            step { store.deleteTransaction(victim) }
+            expect(store.data.transactions.count == remaining - 1, "операция удалена")
+            manager.undo()
+            expect(store.data.transactions.count == remaining, "отмена вернула удалённую операцию")
+        } else {
+            expect(false, "в примере есть хотя бы одна операция")
+        }
+
+        // Без менеджера отмены хранилище должно работать как раньше.
+        let plain = Store(data: AppData.starter(), persists: false)
+        let plainBefore = plain.data.transactions.count
+        plain.addTransaction(txn)
+        expect(plain.data.transactions.count == plainBefore + 1, "без менеджера отмены запись не ломается")
     }
 
     private static func checkMonthKey() {

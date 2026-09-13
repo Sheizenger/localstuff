@@ -56,6 +56,55 @@ enum Persistence {
         }
     }
 
+    // MARK: Резервные копии
+
+    static var backupsURL: URL {
+        folderURL.appendingPathComponent("Backups", isDirectory: true)
+    }
+
+    /// Сколько копий держим: раз в неделю — это около двух месяцев истории.
+    static let backupsToKeep = 8
+
+    /// Копии, от свежей к старой. Имя файла заканчивается датой, поэтому сортировка
+    /// по имени и есть сортировка по времени.
+    static func backups() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: backupsURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        return files
+            .filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
+    static func latestBackupDate() -> Date? {
+        guard let newest = backups().first else { return nil }
+        let values = try? newest.resourceValues(forKeys: [.contentModificationDateKey])
+        return values?.contentModificationDate
+    }
+
+    /// Копия с сегодняшней датой в имени: несколько запусков за день не плодят файлы.
+    @discardableResult
+    static func makeBackup(_ data: AppData, now: Date = Date()) -> URL? {
+        do {
+            try FileManager.default.createDirectory(at: backupsURL, withIntermediateDirectories: true)
+            let url = backupsURL.appendingPathComponent("horizon-\(Fmt.stampKey.string(from: now)).json")
+            let raw = try makeEncoder().encode(data)
+            try raw.write(to: url, options: .atomic)
+            pruneBackups()
+            return url
+        } catch {
+            NSLog("Horizon: не удалось сделать резервную копию — \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    static func pruneBackups() {
+        for url in backups().dropFirst(backupsToKeep) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     static func export(_ data: AppData, to url: URL) throws {
         let raw = try makeEncoder().encode(data)
         try raw.write(to: url, options: .atomic)

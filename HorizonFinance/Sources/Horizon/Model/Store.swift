@@ -16,6 +16,10 @@ final class Store: ObservableObject {
     /// Самопроверка и предпросмотры работают с копией данных и ничего не пишут на диск.
     private let persists: Bool
 
+    /// Менеджер отмены окна. Его выдаёт SwiftUI, поэтому ⌘Z в текстовом поле по-прежнему
+    /// отменяет набор текста, а не сносит всю операцию целиком.
+    weak var undoManager: UndoManager? = nil
+
     init(data: AppData? = nil, persists: Bool = true) {
         self.persists = persists
         if let data = data {
@@ -80,9 +84,60 @@ final class Store: ObservableObject {
         }
     }
 
+    // MARK: Резервные копии
+
+    @Published private(set) var lastBackupAt: Date? = nil
+
+    /// Раз в неделю откладывает копию данных рядом с основным файлом.
+    ///
+    /// Отмена спасает от ошибки в текущем сеансе, а копия — от той, что заметили
+    /// через месяц. Стоит это одного файла в неделю, поэтому делается молча.
+    func backUpIfNeeded(now: Date = Date()) {
+        guard persists else { return }
+        let last = Persistence.latestBackupDate()
+        lastBackupAt = last
+        if let last = last, now.timeIntervalSince(last) < 7 * 24 * 3600 { return }
+        if Persistence.makeBackup(data, now: now) != nil {
+            lastBackupAt = now
+        }
+    }
+
+    /// Копия по требованию — из настроек.
+    @discardableResult
+    func backUpNow(now: Date = Date()) -> URL? {
+        guard persists else { return nil }
+        saveNow()
+        let url = Persistence.makeBackup(data, now: now)
+        if url != nil { lastBackupAt = now }
+        return url
+    }
+
+    // MARK: Отмена
+
+    /// Запоминает состояние до изменения. Вызывается первой строкой в тех методах,
+    /// которые меняют данные по воле пользователя.
+    ///
+    /// Снимок — это структура: массивы копируются лениво, поэтому память тратится
+    /// только на то, что потом действительно изменилось.
+    func checkpoint(_ name: String) {
+        register(name: name, snapshot: data)
+    }
+
+    private func register(name: String, snapshot: AppData) {
+        guard let manager = undoManager else { return }
+        manager.registerUndo(withTarget: self) { store in
+            // Регистрация изнутри отмены превращается в «вернуть» — так работает AppKit.
+            let current = store.data
+            store.data = snapshot
+            store.register(name: name, snapshot: current)
+        }
+        manager.setActionName(name)
+    }
+
     // MARK: Операции
 
     func addTransaction(_ txn: Txn) {
+        checkpoint("Добавление операции")
         data.transactions.append(txn)
         data.transactions.sort { $0.date > $1.date }
         runNotifications()
@@ -90,21 +145,42 @@ final class Store: ObservableObject {
 
     func updateTransaction(_ txn: Txn) {
         guard let index = data.transactions.firstIndex(where: { $0.id == txn.id }) else { return }
+        checkpoint("Изменение операции")
         data.transactions[index] = txn
         data.transactions.sort { $0.date > $1.date }
     }
 
     func deleteTransaction(_ txn: Txn) {
+        checkpoint("Удаление операции")
         data.transactions.removeAll { $0.id == txn.id }
     }
 
     func deleteTransactions(ids: Set<UUID>) {
+        checkpoint(ids.count == 1 ? "Удаление операции" : "Удаление операций")
         data.transactions.removeAll { ids.contains($0.id) }
+    }
+
+    /// Копия операции на сегодня: повторяющиеся покупки проще продублировать, чем набирать.
+    @discardableResult
+    func duplicateTransaction(_ txn: Txn) -> Txn {
+        checkpoint("Дублирование операции")
+        var copy = txn
+        copy.id = UUID()
+        copy.recurringID = nil
+        copy.receiptLines = txn.receiptLines.map { line in
+            var fresh = line
+            fresh.id = UUID()
+            return fresh
+        }
+        data.transactions.append(copy)
+        data.transactions.sort { $0.date > $1.date }
+        return copy
     }
 
     // MARK: Цели
 
     func addGoal(_ goal: Goal) {
+        checkpoint("Добавление цели")
         var goal = goal
         if goal.priority == 0 {
             goal.priority = (data.goals.map { $0.priority }.max() ?? -1) + 1
@@ -114,12 +190,14 @@ final class Store: ObservableObject {
 
     func updateGoal(_ goal: Goal) {
         guard let index = data.goals.firstIndex(where: { $0.id == goal.id }) else { return }
+        checkpoint("Изменение цели")
         data.goals[index] = goal
     }
 
     /// Быстрое переключение режима прямо из карточки цели.
     func toggleFunding(_ goal: Goal) {
         guard let index = data.goals.firstIndex(where: { $0.id == goal.id }) else { return }
+        checkpoint("Режим накопления")
         data.goals[index].funding = data.goals[index].funding == .parallel ? .queued : .parallel
         // Параллельная цель с нулевой долей не получала бы ничего — даём осмысленный минимум.
         if data.goals[index].funding == .parallel && data.goals[index].share <= 0 {
@@ -128,6 +206,7 @@ final class Store: ObservableObject {
     }
 
     func deleteGoal(_ goal: Goal) {
+        checkpoint("Удаление цели")
         data.goals.removeAll { $0.id == goal.id }
         data.contributions.removeAll { $0.goalID == goal.id }
     }
@@ -137,6 +216,7 @@ final class Store: ObservableObject {
         guard let index = ordered.firstIndex(where: { $0.id == goal.id }) else { return }
         let target = up ? index - 1 : index + 1
         guard target >= 0 && target < ordered.count else { return }
+        checkpoint("Порядок целей")
         ordered.swapAt(index, target)
         for (i, g) in ordered.enumerated() {
             if let realIndex = data.goals.firstIndex(where: { $0.id == g.id }) {
@@ -148,11 +228,13 @@ final class Store: ObservableObject {
     // MARK: Пополнения целей
 
     func addContribution(_ contribution: Contribution) {
+        checkpoint("Пополнение цели")
         data.contributions.append(contribution)
         data.contributions.sort { $0.date > $1.date }
     }
 
     func deleteContribution(_ contribution: Contribution) {
+        checkpoint("Удаление пополнения")
         data.contributions.removeAll { $0.id == contribution.id }
     }
 
@@ -163,15 +245,18 @@ final class Store: ObservableObject {
     // MARK: Категории
 
     func addCategory(_ category: Category) {
+        checkpoint("Добавление категории")
         data.categories.append(category)
     }
 
     func updateCategory(_ category: Category) {
         guard let index = data.categories.firstIndex(where: { $0.id == category.id }) else { return }
+        checkpoint("Изменение категории")
         data.categories[index] = category
     }
 
     func deleteCategory(_ category: Category) {
+        checkpoint("Удаление категории")
         // Операции не удаляем — просто теряют категорию и считаются свободными тратами.
         data.categories.removeAll { $0.id == category.id }
         for index in data.transactions.indices where data.transactions[index].categoryID == category.id {
@@ -189,15 +274,18 @@ final class Store: ObservableObject {
     @Published private(set) var lastRunCreated: Int = 0
 
     func addRule(_ rule: RecurringRule) {
+        checkpoint("Добавление шаблона")
         data.recurring.append(rule)
     }
 
     func updateRule(_ rule: RecurringRule) {
         guard let index = data.recurring.firstIndex(where: { $0.id == rule.id }) else { return }
+        checkpoint("Изменение шаблона")
         data.recurring[index] = rule
     }
 
     func deleteRule(_ rule: RecurringRule) {
+        checkpoint("Удаление шаблона")
         data.recurring.removeAll { $0.id == rule.id }
     }
 
@@ -275,6 +363,7 @@ final class Store: ObservableObject {
     /// потому что в приложении именно они съедают месячный лимит.
     @discardableResult
     func importReceipt(_ receipt: ParsedReceipt, splitFlexible: Bool, updateBasketPrices: Bool) -> [Txn] {
+        checkpoint("Запись чека")
         let date = receipt.date ?? Date()
         let merchant = receipt.merchantName
         var note = merchant.isEmpty ? "Чек" : "Чек: \(merchant)"
@@ -338,7 +427,7 @@ final class Store: ObservableObject {
     }
 
     /// Цены с реального чека важнее модельных — переносим их в корзину.
-    private func applyReceiptPrices(_ receipt: ParsedReceipt, chainID: String) {
+    func applyReceiptPrices(_ receipt: ParsedReceipt, chainID: String) {
         for line in receipt.lines {
             guard !line.isDiscount, let productID = line.productID else { continue }
             guard line.quantity > 0.0001, line.amount > 0 else { continue }
@@ -443,6 +532,7 @@ final class Store: ObservableObject {
 
     @discardableResult
     func importStatement(rows: [StatementRow]) -> Int {
+        checkpoint("Импорт выписки")
         var created = 0
         for row in rows where row.include {
             var txn = Txn()
@@ -469,16 +559,19 @@ final class Store: ObservableObject {
     // MARK: Данные целиком
 
     func loadDemoData() {
+        checkpoint("Загрузка примера")
         data = AppData.demo()
         saveNow()
     }
 
     func resetAll() {
+        checkpoint("Сброс данных")
         data = AppData.starter()
         saveNow()
     }
 
     func replace(with newData: AppData) {
+        checkpoint("Загрузка файла данных")
         data = newData
         saveNow()
     }

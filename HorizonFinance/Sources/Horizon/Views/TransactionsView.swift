@@ -22,6 +22,9 @@ struct TransactionsView: View {
     @State private var editingTxn: Txn? = nil
     @State private var expandedReceiptID: UUID? = nil
     @State private var filter: Filter = .all
+    @State private var searchAllMonths = false
+    /// Какую операцию открыли специально ради чека.
+    @State private var openReceiptFor: UUID? = nil
 
     /// Быстрый фильтр списка — включается нажатием на плитку итогов.
     enum Filter: String, CaseIterable, Identifiable {
@@ -65,8 +68,12 @@ struct TransactionsView: View {
             }
         }
         .sheet(item: $editingTxn) { txn in
-            TransactionEditor(mode: .edit(txn))
+            TransactionEditor(mode: .edit(txn), opensReceipt: openReceiptFor == txn.id)
                 .environmentObject(store)
+        }
+        .onChange(of: editingTxn?.id) { id in
+            // Флаг живёт ровно одно открытие окна, иначе чек лез бы вперёд и в обычной правке.
+            if id == nil { openReceiptFor = nil }
         }
     }
 
@@ -102,9 +109,17 @@ struct TransactionsView: View {
 
             Spacer()
 
-            TextField("Поиск по заметке или категории", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 260)
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Поиск по заметке, магазину или категории", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Toggle("искать во всех месяцах", isOn: $searchAllMonths)
+                        .toggleStyle(.checkbox)
+                        .font(.caption2)
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+            .frame(width: 260)
 
             Button {
                 bus.showReceiptImport = true
@@ -217,6 +232,17 @@ struct TransactionsView: View {
 
     @ViewBuilder
     private var filterChip: some View {
+        if searchesEverywhere && tab == .operations {
+            HStack(spacing: 8) {
+                Label(
+                    "Поиск по всем месяцам: найдено \(filteredTxns.count) на \(Fmt.money(filteredTxns.reduce(0.0) { $0 + $1.amount }, code: currency))",
+                    systemImage: "magnifyingglass"
+                )
+                .font(.caption)
+                .foregroundStyle(Palette.teal)
+                Spacer()
+            }
+        }
         if filter != .all {
             HStack(spacing: 8) {
                 Label("Показаны только: \(filter.title)", systemImage: "line.3.horizontal.decrease.circle.fill")
@@ -244,16 +270,29 @@ struct TransactionsView: View {
         if Cal.ru.isDateInYesterday(date) {
             return "Вчера, " + Fmt.daySimple.string(from: date)
         }
-        return Fmt.dayLong.string(from: date).capitalizedFirst
+        let title = Fmt.dayLong.string(from: date).capitalizedFirst
+        // В поиске по всем месяцам без года дни соседних лет выглядят одинаково.
+        let year = Cal.ru.component(.year, from: date)
+        if year != Cal.ru.component(.year, from: Date()) {
+            return "\(title) \(year)"
+        }
+        return title
     }
 
     // MARK: Операции
 
+    /// Поиск по всем месяцам сам по себе бесполезен на пустой строке — включаем его
+    /// только когда есть что искать.
+    private var searchesEverywhere: Bool {
+        searchAllMonths && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var filteredTxns: [Txn] {
         let analytics = store.analytics
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let everywhere = searchesEverywhere
         return store.data.transactions
-            .filter { MonthKey(date: $0.date) == month }
+            .filter { everywhere || MonthKey(date: $0.date) == month }
             .filter { txn in
                 switch filter {
                 case .all:
@@ -335,30 +374,59 @@ struct TransactionsView: View {
                                 .onTapGesture { editingTxn = txn }
                                 .contextMenu {
                                     Button("Изменить") { editingTxn = txn }
+                                    Button(txn.hasReceipt ? "Изменить чек…" : "Прикрепить чек…") {
+                                        openReceiptFor = txn.id
+                                        editingTxn = txn
+                                    }
+                                    Button("Дублировать") { editingTxn = store.duplicateTransaction(txn) }
+                                    Divider()
                                     Button("Удалить", role: .destructive) { store.deleteTransaction(txn) }
                                 }
 
                             if txn.hasReceipt {
-                                Button {
-                                    expandedReceiptID = expandedReceiptID == txn.id ? nil : txn.id
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Image(systemName: expandedReceiptID == txn.id ? "chevron.down" : "chevron.right")
-                                            .font(.system(size: 9, weight: .bold))
-                                        Image(systemName: "doc.text")
-                                            .font(.system(size: 10))
-                                        Text("чек, позиций: \(txn.receiptLines.count)")
-                                            .font(.caption2)
+                                HStack(spacing: 10) {
+                                    Button {
+                                        expandedReceiptID = expandedReceiptID == txn.id ? nil : txn.id
+                                    } label: {
+                                        HStack(spacing: 5) {
+                                            Image(systemName: expandedReceiptID == txn.id ? "chevron.down" : "chevron.right")
+                                                .font(.system(size: 9, weight: .bold))
+                                            Image(systemName: "doc.text")
+                                                .font(.system(size: 10))
+                                            Text("чек, позиций: \(txn.receiptLines.count)")
+                                                .font(.caption2)
+                                        }
+                                        .foregroundStyle(Palette.teal)
                                     }
-                                    .foregroundStyle(Palette.teal)
+                                    .buttonStyle(.plain)
+
+                                    // Итог операции и сумма позиций разошлись — это видно сразу,
+                                    // а не после того, как месяц сойдётся не с тем числом.
+                                    let receiptSum = txn.receiptLines.reduce(0.0) { $0 + $1.amount }
+                                    if abs(txn.amount - receiptSum) >= 0.01 {
+                                        Label(
+                                            Fmt.signedMoney(txn.amount - receiptSum, code: currency, fraction: true),
+                                            systemImage: "exclamationmark.triangle.fill"
+                                        )
+                                        .font(.caption2)
+                                        .foregroundStyle(Palette.amber)
+                                        .help("Сумма операции не сходится с позициями чека")
+                                    }
                                 }
-                                .buttonStyle(.plain)
                                 .padding(.leading, 46)
 
                                 if expandedReceiptID == txn.id {
-                                    ReceiptBreakdownView(lines: txn.receiptLines, currency: currency)
-                                        .padding(.leading, 46)
-                                        .padding(.bottom, 4)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ReceiptBreakdownView(lines: txn.receiptLines, currency: currency)
+                                        Button("Поправить чек…") {
+                                            openReceiptFor = txn.id
+                                            editingTxn = txn
+                                        }
+                                            .buttonStyle(.link)
+                                            .font(.caption2)
+                                    }
+                                    .padding(.leading, 46)
+                                    .padding(.bottom, 4)
                                 }
                             }
                         }

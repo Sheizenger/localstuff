@@ -423,8 +423,57 @@ struct SettingsView: View {
                 Button("Демо-данные") { confirmDemo = true }
                 Button("Сбросить всё", role: .destructive) { confirmReset = true }
             }
+
+            Divider().opacity(0.4)
+
+            backupBlock
         }
         .cardStyle()
+    }
+
+    /// Копии складываются молча раз в неделю. Здесь — только чтобы это не было тайной.
+    private var backupBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Резервные копии")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("храним последние \(Persistence.backupsToKeep)")
+                    .font(.caption2)
+                    .foregroundStyle(Palette.muted)
+            }
+
+            let copies = Persistence.backups()
+            if let last = store.lastBackupAt ?? Persistence.latestBackupDate() {
+                KeyValueRow(
+                    key: "Последняя копия",
+                    value: Fmt.dayShort.string(from: last) + " · копий: \(copies.count)"
+                )
+            } else {
+                Text("Копий пока нет — первая появится при следующем запуске.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+
+            HStack(spacing: 10) {
+                Button("Сделать копию сейчас") {
+                    if let url = store.backUpNow() {
+                        message = "Копия сохранена: \(url.lastPathComponent)"
+                    } else {
+                        message = "Копию сделать не удалось"
+                    }
+                }
+                Button("Открыть папку копий") {
+                    try? FileManager.default.createDirectory(at: Persistence.backupsURL, withIntermediateDirectories: true)
+                    NSWorkspace.shared.activateFileViewerSelecting([Persistence.backupsURL])
+                }
+                Spacer()
+            }
+            Text("Копия делается раз в неделю при запуске. Отмена (⌘Z) спасает от ошибки сейчас, копия — от той, что заметили через месяц.")
+                .font(.caption2)
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func timeString(_ date: Date) -> String {

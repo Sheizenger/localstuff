@@ -12,9 +12,19 @@ struct TransactionEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     var mode: Mode
+    /// Открыть сразу окно чека: из контекстного меню «Прикрепить чек…» это ожидаемое поведение.
+    var opensReceipt: Bool = false
 
     @State private var draft = Txn()
     @State private var loaded = false
+    /// Оба окна чека идут через один слот: так исключается спор двух `.sheet` на одном экране.
+    private enum ReceiptSheet: Int, Identifiable {
+        case scan
+        case edit
+        var id: Int { rawValue }
+    }
+
+    @State private var receiptSheet: ReceiptSheet? = nil
 
     private var isEditing: Bool {
         if case .edit = mode { return true }
@@ -22,6 +32,15 @@ struct TransactionEditor: View {
     }
 
     private var categories: [Category] { store.categories(for: draft.flow) }
+
+    private var receiptTotal: Double {
+        draft.receiptLines.reduce(0.0) { $0 + $1.amount }
+    }
+
+    /// Насколько сумма операции разошлась с чеком. Ноль — всё сходится.
+    private var receiptMismatch: Double {
+        ((draft.amount - receiptTotal) * 100).rounded() / 100
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -60,12 +79,28 @@ struct TransactionEditor: View {
                             .foregroundStyle(Palette.muted)
                     }
                 }
+
+                if draft.flow == .expense {
+                    Section("Чек") { receiptSection }
+                }
             }
             .formStyle(.grouped)
 
             footer
         }
         .frame(width: 460)
+        .sheet(item: $receiptSheet) { which in
+            switch which {
+            case .scan:
+                ReceiptImportView(attachTitle: attachTitle) { receipt, overwriteAmount in
+                    apply(receipt, overwriteAmount: overwriteAmount)
+                }
+                .environmentObject(store)
+            case .edit:
+                ReceiptEditor(merchant: draft.merchant, lines: $draft.receiptLines, amount: $draft.amount)
+                    .environmentObject(store)
+            }
+        }
         .onAppear {
             guard !loaded else { return }
             loaded = true
@@ -73,6 +108,9 @@ struct TransactionEditor: View {
                 draft = txn
             } else {
                 draft.categoryID = store.categories(for: .expense).first?.id
+            }
+            if opensReceipt {
+                receiptSheet = draft.hasReceipt ? .edit : .scan
             }
         }
         .onChange(of: draft.flow) { newFlow in
@@ -92,6 +130,87 @@ struct TransactionEditor: View {
         .padding(.horizontal, 20)
         .padding(.top, 18)
         .padding(.bottom, 4)
+    }
+
+    // MARK: Чек внутри операции
+
+    /// Как назвать операцию в шапке окна разбора, чтобы было видно, куда клеим чек.
+    private var attachTitle: String {
+        let note = draft.note.trimmingCharacters(in: .whitespaces)
+        if !note.isEmpty { return note }
+        if !draft.merchant.isEmpty { return draft.merchant }
+        let category = store.data.categories.first(where: { $0.id == draft.categoryID })?.name
+        return category ?? "операция"
+    }
+
+    @ViewBuilder
+    private var receiptSection: some View {
+        if draft.hasReceipt {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Позиций: \(draft.receiptLines.count)", systemImage: "doc.text")
+                        .font(.callout)
+                    Spacer()
+                    Text(Fmt.money(receiptTotal, code: store.currency, fraction: true))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(Palette.muted)
+                }
+
+                if abs(receiptMismatch) >= 0.01 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Palette.amber)
+                            Text("Сумма операции и позиции чека расходятся на \(Fmt.signedMoney(receiptMismatch, code: store.currency, fraction: true))")
+                                .font(.caption)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Button("Взять сумму по позициям") {
+                            draft.amount = (receiptTotal * 100).rounded() / 100
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Button("Изменить чек…") { receiptSheet = .edit }
+                    Button("Распознать заново…") { receiptSheet = .scan }
+                    Spacer()
+                    Button("Убрать") { draft.receiptLines = [] }
+                        .foregroundStyle(Palette.red)
+                }
+                .font(.callout)
+            }
+            .padding(.vertical, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    receiptSheet = .scan
+                } label: {
+                    Label("Прикрепить чек…", systemImage: "doc.viewfinder")
+                }
+                Text("Снимок, фото или PDF. Позиции лягут внутрь этой операции и разложатся по категориям — сумму при этом можно оставить свою.")
+                    .font(.caption2)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    /// Разобранный чек ложится в черновик — в базу он попадёт вместе с операцией.
+    private func apply(_ receipt: ParsedReceipt, overwriteAmount: Bool) {
+        draft.receiptLines = receipt.lines
+        if draft.merchant.isEmpty { draft.merchant = receipt.merchantName }
+        if draft.note.trimmingCharacters(in: .whitespaces).isEmpty, !receipt.merchantName.isEmpty {
+            draft.note = "Чек: \(receipt.merchantName)"
+        }
+        if overwriteAmount, receipt.amountToRecord > 0 {
+            draft.amount = (receipt.amountToRecord * 100).rounded() / 100
+        }
+        // Дату существующей операции чек не двигает: пользователь мог поставить её осознанно.
+        if !isEditing, let date = receipt.date { draft.date = date }
     }
 
     private var footer: some View {

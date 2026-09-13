@@ -6,6 +6,13 @@ struct ReceiptImportView: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
 
+    /// Название операции, к которой чек прикрепляют. Пусто — чек создаёт новую операцию.
+    var attachTitle: String? = nil
+    /// Куда отдать разобранный чек в режиме прикрепления.
+    var onAttach: ((ParsedReceipt, Bool) -> Void)? = nil
+
+    private var isAttaching: Bool { onAttach != nil }
+
     private enum Stage: Equatable {
         case idle
         case scanning
@@ -19,6 +26,8 @@ struct ReceiptImportView: View {
     @State private var splitFlexible = true
     @State private var updatePrices = true
     @State private var showRawText = false
+    /// В режиме прикрепления: подставить ли итог чека в сумму операции.
+    @State private var overwriteAmount = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,11 +53,13 @@ struct ReceiptImportView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Чек из магазина")
+            Text(attachTitle == nil ? "Чек из магазина" : "Чек к операции")
                 .font(.headline)
-            Text("Снимок, фото или PDF. Распознавание идёт на этом компьютере — файл никуда не отправляется.")
+            Text(attachTitle.map { "«\($0)» · распознавание идёт на этом компьютере, файл никуда не отправляется." }
+                 ?? "Снимок, фото или PDF. Распознавание идёт на этом компьютере — файл никуда не отправляется.")
                 .font(.caption)
                 .foregroundStyle(Palette.muted)
+                .lineLimit(2)
         }
         .padding(.horizontal, 20)
         .padding(.top, 18)
@@ -210,63 +221,42 @@ struct ReceiptImportView: View {
             }
 
             ForEach($receipt.lines) { $line in
-                receiptRow($line)
+                ReceiptLineRow(line: $line) {
+                    receipt.lines.removeAll { $0.id == line.id }
+                }
                 Divider().opacity(0.4)
             }
-        }
-    }
-
-    private func receiptRow(_ line: Binding<ReceiptLine>) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                TextField("Название", text: line.name)
-                    .textFieldStyle(.plain)
-                    .font(.body)
-                Text(line.wrappedValue.raw)
-                    .font(.caption2)
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Picker("", selection: productBinding(line)) {
-                Text("не узнан").tag("")
-                ForEach(BasketCatalog.products) { product in
-                    Text("\(product.category.emoji) \(product.name)").tag(product.id)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 190)
-
-            TextField("", value: line.quantity, format: .number.precision(.fractionLength(0...3)))
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 60)
-
-            TextField("", value: line.amount, format: .number.precision(.fractionLength(2)))
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 76)
 
             Button {
-                receipt.lines.removeAll { $0.id == line.wrappedValue.id }
+                var line = ReceiptLine()
+                line.quantity = 1
+                receipt.lines.append(line)
             } label: {
-                Image(systemName: "minus.circle")
+                Label("Добавить строку", systemImage: "plus.circle")
+                    .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Убрать строку")
+            .padding(.top, 2)
         }
-        .padding(.vertical, 2)
     }
 
     private var optionsBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("Бытовое и алкоголь записать отдельной свободной тратой", isOn: $splitFlexible)
-                .font(.callout)
-            Text("В приложении лимит месяца съедают именно свободные траты. Если не разделять, весь чек уйдёт в обязательные «Продукты».")
-                .font(.caption2)
-                .foregroundStyle(Palette.muted)
-                .fixedSize(horizontal: false, vertical: true)
+            if isAttaching {
+                Toggle("Поставить сумму операции по чеку", isOn: $overwriteAmount)
+                    .font(.callout)
+                Text("Иначе сумма операции останется прежней, а чек ляжет внутрь как расшифровка. Поправить и то и другое можно потом кнопкой «Изменить чек».")
+                    .font(.caption2)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Toggle("Бытовое и алкоголь записать отдельной свободной тратой", isOn: $splitFlexible)
+                    .font(.callout)
+                Text("В приложении лимит месяца съедают именно свободные траты. Если не разделять, весь чек уйдёт в обязательные «Продукты».")
+                    .font(.caption2)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Toggle("Обновить цены корзины по этому чеку", isOn: $updatePrices)
                 .font(.callout)
@@ -321,8 +311,12 @@ struct ReceiptImportView: View {
     }
 
     private var commitTitle: String {
-        guard stage == .review else { return "Записать" }
-        return "Записать \(Fmt.money(receipt.amountToRecord, code: store.currency, fraction: true))"
+        guard stage == .review else { return isAttaching ? "Прикрепить" : "Записать" }
+        let sum = Fmt.money(receipt.amountToRecord, code: store.currency, fraction: true)
+        if isAttaching {
+            return overwriteAmount ? "Прикрепить и поставить \(sum)" : "Прикрепить"
+        }
+        return "Записать \(sum)"
     }
 
     // MARK: Привязки
@@ -331,23 +325,6 @@ struct ReceiptImportView: View {
         Binding(
             get: { receipt.date ?? Date() },
             set: { receipt.date = $0 }
-        )
-    }
-
-    /// Выбор товара из справочника: заодно чинит категорию и учит разбор на будущее.
-    private func productBinding(_ line: Binding<ReceiptLine>) -> Binding<String> {
-        Binding(
-            get: { line.wrappedValue.productID ?? "" },
-            set: { newValue in
-                if newValue.isEmpty {
-                    line.wrappedValue.productID = nil
-                    return
-                }
-                guard let product = BasketCatalog.product(id: newValue) else { return }
-                line.wrappedValue.productID = product.id
-                line.wrappedValue.category = product.category
-                store.rememberAlias(text: line.wrappedValue.name, productID: product.id)
-            }
         )
     }
 
@@ -430,6 +407,18 @@ struct ReceiptImportView: View {
                 store.rememberAlias(text: line.name, productID: productID)
             }
         }
+
+        if let onAttach = onAttach {
+            // Цены корзины можно обновить и при прикреплении — операция уже есть,
+            // но полка от этого не меняется.
+            if updatePrices, let chainID = receipt.chainID {
+                store.applyReceiptPrices(receipt, chainID: chainID)
+            }
+            onAttach(receipt, overwriteAmount)
+            dismiss()
+            return
+        }
+
         store.importReceipt(receipt, splitFlexible: splitFlexible, updateBasketPrices: updatePrices)
         dismiss()
     }
