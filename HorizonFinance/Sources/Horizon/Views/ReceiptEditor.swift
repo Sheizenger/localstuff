@@ -206,11 +206,7 @@ struct ReceiptEditor: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button {
-                    var line = ReceiptLine()
-                    line.name = ""
-                    line.quantity = 1
-                    line.amount = 0
-                    draftLines.append(line)
+                    draftLines.append(ReceiptLine())
                 } label: {
                     Label("Добавить строку", systemImage: "plus.circle")
                         .font(.caption)

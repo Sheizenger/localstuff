@@ -228,9 +228,7 @@ struct ReceiptImportView: View {
             }
 
             Button {
-                var line = ReceiptLine()
-                line.quantity = 1
-                receipt.lines.append(line)
+                receipt.lines.append(ReceiptLine())
             } label: {
                 Label("Добавить строку", systemImage: "plus.circle")
                     .font(.caption)
@@ -412,6 +410,7 @@ struct ReceiptImportView: View {
             // Цены корзины можно обновить и при прикреплении — операция уже есть,
             // но полка от этого не меняется.
             if updatePrices, let chainID = receipt.chainID {
+                store.checkpoint("Цены по чеку")
                 store.applyReceiptPrices(receipt, chainID: chainID)
             }
             onAttach(receipt, overwriteAmount)
